@@ -74,6 +74,21 @@ Once specified, every rule becomes an editable data file with the
 01/02 season as default — see "Rules as data" in
 [architecture.md](architecture.md).
 
+## Calendars (implemented)
+
+League fixture lists are generated, not stored: `Schedule` in
+`cm0102-core` builds a dated calendar from a club list with the
+circle-method round robin (`Schedule::league_calendar`, parameterized
+by first-round date, round spacing and legs) and feeds Continue as a
+`DayEventSource`, stopping on the managed club's match days. The 01/02
+calendar quirks (derby placement, TV moves) are still open, so the
+generator takes the structural parameters and absorbs the quirks as
+editable rules when observed. Calendars are wired into careers:
+byte 87 is imported into `Club.league_id` (bucket slots in
+`NON_LEAGUE_SLOTS` get no calendar), the career start generates the
+league calendar, and the season rollover regenerates it year after
+year (see "Season rollover" in [season.md](season.md)).
+
 ## Findings
 
 Evidence levels: VERIFIED-DATA (imported bytes) vs STRING-EVIDENCE

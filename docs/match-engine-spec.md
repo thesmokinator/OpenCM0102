@@ -6,9 +6,12 @@
 Status: **not yet specified**.
 
 The engine in `crates/cm0102-match` is a declared placeholder (Poisson goal
-counts, deterministic per seed) that exists only to exercise the season
-loop and UI behind the `MatchEngine` trait. It must never be presented to
-users as a reproduction of CM 01/02.
+counts scaled by the relative average current ability of the two
+starting elevens, deterministic per seed) that exists only to exercise
+the season loop and UI behind the `MatchEngine` trait. It must never be
+presented to users as a reproduction of CM 01/02: the strength scaling
+is invented, and the real attribute weights are still open (see the
+coverage list below).
 
 Observations of the original game's match behaviour are recorded here
 from playing the original game before any faithful engine is

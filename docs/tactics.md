@@ -29,6 +29,27 @@ match-engine effects are implemented:
   54 player attributes (Goalkeeper through Free Role — see
   [dat-format.md](dat-format.md)). Their in-match meaning is open.
 - Player records carry a squad number.
+- Formation catalog (STRING-EVIDENCE, exe-string inventory lines
+  28082–28090): `3-4-3`, `4-5-1`, `4-1-2-1-2`, `3-5-2`, `4-2-4`,
+  `4-3-3`, `4-4-2`, `5-3-2`, `5-3-2 Sweeper`, in this list order
+  under "Preferred Formation". Style-qualified variants appear in
+  news text (`3-5-2 Attacking` line 23702, `5-3-2 Sweeper` line
+  27001, `a 4-4-2` line 26992). Slot layouts per formation are not
+  evidenced and stay open.
+- Team instruction set (STRING-EVIDENCE): playmaker (line 28702),
+  men behind ball (28707), counter attack (28708), offside trap
+  preference (28070), corner/free-kick takers, penalty takers
+  (28679), mentality attacking/defensive/normal. Effects open.
+
+## Implemented model
+
+`Formation`, `Lineup` (11 distinct starters, best-eleven
+auto-pick), `PlayerInstructions` (only rows with observed option
+sets: marking, set-piece roles, pass direction),
+`TeamInstructions` and `TeamTactics` live in `cm0102-core`
+`tactics`. The match engine reads lineup strength (average current
+ability) through `MatchContext`; all instruction effects are
+explicitly unmodelled until observed.
 
 ## Findings
 

@@ -42,8 +42,13 @@ user ISO → ISO 9660 reader → InstallShield cabinet → .dat parsers
 - `data.rs`: `Club`, `Player` (54 attributes in `ATTRIBUTE_NAMES`
   order), `Nation`, `Manager`.
 - `calendar.rs`: `GameDate`; the season starts 1 July 2001.
-- `game_state.rs`: `GameState` (date, managed club, manager) and
-  the versioned native save envelope `SavedCareer`.
+- `game_state.rs`: `GameState` (date, managed club, manager,
+  season schedule) and the versioned native save envelope
+  `SavedCareer`.
+- `schedule.rs`: `Schedule`/`Fixture` with round-robin calendar
+  generation; the schedule is the first real `DayEventSource`.
+- `simulation.rs`: `process_day()` plus event-driven
+  `continue_until_event()` against editable `ContinueRules`.
 - `traits.rs`: `DataProvider` (read access to the database),
   `MatchEngine` (`simulate` must be deterministic per seed), and
   the shared `CoreError` (`NotFound` vs `Storage`).
@@ -53,10 +58,13 @@ user ISO → ISO 9660 reader → InstallShield cabinet → .dat parsers
 `app/src/app.rs` owns a small state machine:
 
 ```text
-SetupWizard (Setup Game grid) → NewCareer / LoadCareer → Game
-     ↓ GameSettings / Credits
-     → DataExplorer ⇄ DatabaseEditor
+SetupWizard (hub) → NewCareer / LoadCareer → Game → Menu → hub
+     ↓ GameSettings / Credits / Tools (DataExplorer, DatabaseEditor)
 ```
+
+The hub shell (banner plus content) owns every screen except Game;
+the game shell (section sidebar, top bar, Continue bar) owns Game
+alone, with the Menu submenu as its only way out.
 
 - The ISO import runs on a background thread; the UI polls progress
   events and stays responsive. The remembered ISO position

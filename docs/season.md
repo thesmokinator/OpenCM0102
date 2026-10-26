@@ -90,3 +90,35 @@ become editable data with the 01/02 behaviour as default — see
 - Day-tick pipeline order, intake/regen rules, inbox flow, finance
   formulas, job labels, friendlies: needs playtest plus
   function-level analysis.
+
+## Continue model (hypothesis, needs playtest)
+
+Static evidence says the day is the simulation tick (daily rolls,
+training, fitness, news) while Continue is event-driven: one press
+shows "Processing, Please Wait ..." and the game stops at the next
+date needing the manager (own match, inbox items, offer responses,
+deadlines). Holiday is a plain toggle ("Go on Holiday" / "Return
+from holiday?", no until-date): the same loop without stop
+conditions ("On Holiday (Watching)" still shows matches).
+
+Verify by pressing Continue repeatedly from a season start and
+logging each stop's date delta and trigger; empty days must never
+stop the loop. Implementation shape, already in `cm0102-core`
+`simulation`: `process_day()` runs the daily pipeline and
+`continue_until_event()` loops it against editable stop rules
+(`ContinueRules`: own match, inbox, offer response, deadline,
+plus a safety day cap).
+
+## Season rollover (implemented)
+
+`GameState` owns this season's `Schedule`. When no fixture remains
+on or after today, the app generates next season's calendar from the
+same league membership (`Schedule::for_club_league`, first round
+18 August of the advancing year), so careers continue year after
+year; old saves with an empty schedule roll into a fresh calendar
+on the next Continue. Promotion and relegation between seasons,
+per-league start dates and the 01/02 calendar quirks are still
+open — the generator takes them as parameters so they land as
+editable rules. Only played results persist per fixture; other
+clubs' matches are not auto-simulated yet (needed for the league
+table).

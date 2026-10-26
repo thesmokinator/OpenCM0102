@@ -15,15 +15,28 @@ How to install, import your data and play OpenCM0102.
 
 ## Layout
 
-Like the original game, the window keeps a fixed sidebar on the
-left (version, navigation, restart/exit), a banner naming the
-current screen on top, the game on the right, and a contextual
-action bar at the bottom. The default window is 800×600 and stays
-resizable.
+The window follows three phases. Setup and hub share a chromeless
+shell (slim banner plus content, no sidebar): the hub shows game
+actions, while developer utilities (Data Explorer, Database
+Editor) and Disconnect live in a separate Tools section. Once a
+career starts, the game shell takes over: section sidebar on the
+left, manager/club/date bar on top, Continue bar at the bottom.
+The only ways out of a game are the Menu submenu (back to the hub,
+exit with confirmation) — tools never show while playing. The
+default window is 800×600 and stays resizable.
+
+## Setup Game hub
+
+Every launch lands on the Setup Game hub. Its readiness panel shows
+the two states the app needs: the **ISO image** (not selected, the
+remembered path, or missing when the file moved away) and the
+**database** (ready with club/player counts, or not imported). New
+and restored careers unlock only when the database is ready; with a
+career active, **Return to game** jumps back into it.
 
 ## First launch: importing your data
 
-1. Start OpenCM0102. The Setup Game screen asks for the ISO image.
+1. Start OpenCM0102. The Setup Game hub asks for the ISO image.
 2. Pick the `.iso` file. The import runs in the background (reading
    the disc, extracting the game data, building the database) while
    the window stays responsive.
@@ -31,6 +44,12 @@ resizable.
    Game, Restore Saved Game, Delete Saved Game, Game Settings and
    Game Credits (with project links). One start mode only — there
    is no quick start, network play or hall of fame.
+
+If the ISO is remembered but the database is gone, the hub offers
+**Import database** to rebuild it; if the ISO itself moved, it asks
+you to reconnect it or pick the image again. A database imported by
+an older release shows as outdated and careers stay locked until
+you re-import it from the hub.
 
 Your imported data lives in the user data directory:
 
@@ -60,7 +79,8 @@ The explorer is a read-only browser over your imported data:
   non-playing staff.
 - **Player detail**: clicking a player shows all 54 attributes.
 - **Continue** advances the season date by one day. A new game
-  starts on 1 July 2001.
+  starts on 1 July 2001. (The explorer keeps the single-day step
+  as a debug tool; the main menu's Continue is event-driven.)
 
 ## New career
 
@@ -82,14 +102,23 @@ The main menu mirrors the original game's main screen: a sidebar
 with one section per area of the game, a top bar showing the
 manager, the club and the date, with **Holiday** (interim: a fixed
 7-day jump) and **Save game** (re-saves the active file), and a
-bottom action bar with **Continue** (next day).
+bottom action bar with **Continue**, which simulates forward to
+the next date needing you (your club's match days today; a safety
+cap bounds each press) and reports why it stopped.
 
 Sections: Squad, Tactics, Training, Fixtures, League Table,
 Transfers, Finances & Info, Board, Staff, Search, News, History,
 Records, Awards, Club Info. Squad shows the managed club's real
-squad; every other section is an honest placeholder citing the
-spec in `docs/` that will back it, implemented phase by phase
-(see [roadmap.md](roadmap.md)).
+squad, Fixtures shows your league results and upcoming rounds,
+and Tactics shows your formation and starting eleven (auto-picked
+by ability, changeable formation): press Continue to reach the
+first match day — the next match is always shown under the top
+bar — open Fixtures and **Play** the match. The score is
+simulated from the relative strength of the two elevens and
+recorded. When the season's fixtures run out, next year's calendar
+generates automatically. Every other section is an honest placeholder
+citing the spec in `docs/` that will back it, implemented phase
+by phase (see [roadmap.md](roadmap.md)).
 
 ## Language
 
