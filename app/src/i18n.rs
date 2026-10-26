@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn message_arguments_interpolate() {
         assert_eq!(
-            tr("sidebar-version", &[("version", "0.1.0")]),
+            tr("app-version", &[("version", "0.1.0")]),
             "Version 0.1.0"
         );
     }

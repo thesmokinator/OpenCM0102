@@ -16,11 +16,12 @@ const PAGE_SIZE: i64 = 100;
 impl OpenCmApp {
     /// Database-editor screen: table list, search, paged rows, detail.
     pub fn show_database_editor(&mut self, ui: &mut egui::Ui) {
+        use crate::i18n::{t, tr};
         ui.horizontal(|ui| {
-            ui.heading("Database Editor");
+            ui.heading(t("screen-database-editor"));
             ui.separator();
-            if ui.button("Back to explorer").clicked() {
-                self.screen = Screen::DataExplorer;
+            if ui.button(t("career-back-to-setup")).clicked() {
+                self.screen = Screen::SetupWizard;
             }
         });
         ui.separator();
@@ -33,7 +34,7 @@ impl OpenCmApp {
         egui::SidePanel::left("editor_tables")
             .resizable(true)
             .show_inside(ui, |ui| {
-                ui.heading("Tables");
+                ui.heading(t("editor-tables"));
                 let mut changed = false;
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for (name, count) in self.editor.tables.clone() {
@@ -57,7 +58,7 @@ impl OpenCmApp {
         egui::CentralPanel::default().show_inside(ui, |ui| {
             let search_response = ui.add(
                 egui::TextEdit::singleline(&mut self.editor.search)
-                    .hint_text("Search in all columns…")
+                    .hint_text(t("editor-search-hint"))
                     .desired_width(320.0),
             );
             if search_response.changed() {
@@ -67,7 +68,7 @@ impl OpenCmApp {
             }
             ui.horizontal(|ui| {
                 if ui
-                    .add_enabled(self.editor.page > 0, egui::Button::new("Prev"))
+                    .add_enabled(self.editor.page > 0, egui::Button::new(t("action-prev")))
                     .clicked()
                 {
                     self.editor.page -= 1;
@@ -75,16 +76,17 @@ impl OpenCmApp {
                     self.refresh_editor_rows();
                 }
                 let pages = (self.editor.total_rows + PAGE_SIZE - 1) / PAGE_SIZE.max(1);
-                ui.label(format!(
-                    "{} rows — page {} of {}",
-                    self.editor.total_rows,
-                    self.editor.page + 1,
-                    pages.max(1)
+                let rows = self.editor.total_rows.to_string();
+                let page = (self.editor.page + 1).to_string();
+                let page_count = pages.max(1).to_string();
+                ui.label(tr(
+                    "editor-page",
+                    &[("rows", &rows), ("page", &page), ("pages", &page_count)],
                 ));
                 if ui
                     .add_enabled(
                         ((self.editor.page + 1) as i64) < pages,
-                        egui::Button::new("Next"),
+                        egui::Button::new(t("action-next")),
                     )
                     .clicked()
                 {
@@ -128,7 +130,7 @@ impl OpenCmApp {
                 .and_then(|index| self.editor.rows.get(index).cloned())
             {
                 ui.separator();
-                ui.heading("Row detail");
+                ui.heading(t("editor-row-detail"));
                 egui::Grid::new("editor_detail")
                     .striped(true)
                     .show(ui, |ui| {
@@ -237,11 +239,14 @@ impl OpenCmApp {
             for index in 0..columns.len() {
                 let value: Value = row.get(index)?;
                 values.push(match value {
-                    Value::Null => "—".to_string(),
+                    Value::Null => crate::i18n::t("missing-value"),
                     Value::Integer(v) => v.to_string(),
                     Value::Real(v) => v.to_string(),
                     Value::Text(v) => v,
-                    Value::Blob(v) => format!("<{} bytes>", v.len()),
+                    Value::Blob(v) => {
+                        let bytes = v.len().to_string();
+                        crate::i18n::tr("editor-blob", &[("bytes", &bytes)])
+                    }
                 });
             }
             Ok(values)

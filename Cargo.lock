@@ -2520,6 +2520,7 @@ version = "0.1.0"
 dependencies = [
  "cm0102-core",
  "cm0102-db",
+ "cm0102-match",
  "eframe",
  "fluent",
  "i18n-embed",

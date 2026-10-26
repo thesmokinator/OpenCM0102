@@ -7,7 +7,14 @@
 //! Sections render real data where an engine exists (squad) and an
 //! honest placeholder citing the backing spec everywhere else.
 
-use cm0102_core::SavedCareer;
+use cm0102_core::{
+    Fixture, FixtureResult, Formation, Lineup, MatchContext, MatchEngine, Player, SavedCareer,
+    TeamTactics, process_day,
+};
+use cm0102_match::SimpleMatchEngine;
+
+/// Fallback average ability when no lineup resolves (placeholder).
+const DEFAULT_AVG_CA: f32 = 140.0;
 
 use super::career::{save_career_to, saves_dir};
 use super::*;
@@ -118,12 +125,18 @@ impl GameSection {
 pub struct ShellState {
     /// Currently shown section.
     pub section: GameSection,
+    /// Club whose squad the tactics cache holds.
+    pub tactics_club_id: Option<u32>,
+    /// Cached managed-club squad for the tactics section.
+    pub tactics_squad: Vec<Player>,
 }
 
 impl OpenCmApp {
-    /// Main-menu screen: top info bar, sidebar, section content.
+    /// Main-menu screen: top info bar, next match, sidebar, content.
     pub fn show_game(&mut self, ui: &mut egui::Ui) {
         self.show_game_top_bar(ui);
+        ui.separator();
+        self.show_next_match(ui);
         ui.separator();
         ui.horizontal(|ui| {
             self.show_sidebar(ui);
@@ -143,7 +156,7 @@ impl OpenCmApp {
                 .manager
                 .as_ref()
                 .map(|manager| manager.full_name())
-                .unwrap_or_else(|| "—".to_string());
+                .unwrap_or_else(|| crate::i18n::t("missing-value"));
             ui.strong(&manager);
             ui.separator();
             ui.label(self.managed_club_name());
@@ -151,9 +164,11 @@ impl OpenCmApp {
             ui.label(self.state.current_date.to_string());
             ui.separator();
             if ui.button(t("shell-holiday-7-days")).clicked() {
+                let schedule = self.state.schedule.clone();
                 for _ in 0..7 {
-                    self.state.advance_day();
+                    process_day(&mut self.state, &schedule);
                 }
+                self.rollover_calendar_if_needed();
                 self.status = tr(
                     "shell-holidayed-to",
                     &[("date", &self.state.current_date.to_string())],
@@ -162,7 +177,51 @@ impl OpenCmApp {
             if ui.button(t("shell-save-game")).clicked() {
                 self.save_active_career();
             }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.menu_button(t("shell-menu"), |ui| {
+                    if ui.button(t("career-back-to-setup")).clicked() {
+                        self.screen = Screen::SetupWizard;
+                        ui.close_menu();
+                    }
+                    if ui.button(t("action-exit-game")).clicked() {
+                        self.exit_armed = true;
+                        ui.close_menu();
+                    }
+                });
+            });
         });
+    }
+
+    /// Next unplayed fixture of the managed club, if any.
+    fn show_next_match(&mut self, ui: &mut egui::Ui) {
+        let today = self.state.current_date;
+        let managed = self.state.managed_club_id;
+        let next = self
+            .state
+            .schedule
+            .fixtures
+            .iter()
+            .filter(|fixture| {
+                fixture.result.is_none()
+                    && fixture.date >= today
+                    && managed.is_some_and(|id| {
+                        fixture.home_club_id == id || fixture.away_club_id == id
+                    })
+            })
+            .min_by_key(|fixture| fixture.date);
+        match next {
+            Some(fixture) => {
+                let date = fixture.date.to_string();
+                let game = self.fixture_line(fixture);
+                ui.label(tr(
+                    "fixtures-next-match",
+                    &[("match", &game), ("date", &date)],
+                ));
+            }
+            None => {
+                ui.label(t("fixtures-no-upcoming"));
+            }
+        }
     }
 
     /// Section list on the left, original-game order.
@@ -183,6 +242,8 @@ impl OpenCmApp {
     fn show_section(&mut self, ui: &mut egui::Ui) {
         match self.shell.section {
             GameSection::Squad => self.show_squad_section(ui),
+            GameSection::Tactics => self.show_tactics_section(ui),
+            GameSection::Fixtures => self.show_fixtures_section(ui),
             section => {
                 ui.heading(section.label());
                 ui.label(tr("shell-not-implemented", &[("spec", section.spec())]));
@@ -213,17 +274,255 @@ impl OpenCmApp {
                         player
                             .current_ability
                             .map(|value| value.to_string())
-                            .unwrap_or_else(|| "—".to_string()),
+                            .unwrap_or_else(|| crate::i18n::t("missing-value")),
                     );
                     ui.label(
                         player
                             .potential_ability
                             .map(|value| value.to_string())
-                            .unwrap_or_else(|| "—".to_string()),
+                            .unwrap_or_else(|| crate::i18n::t("missing-value")),
                     );
                     ui.end_row();
                 }
             });
+    }
+
+    /// Managed club's fixtures: results so far and upcoming rounds,
+    /// with a Play button for due matches (today or overdue).
+    fn show_fixtures_section(&mut self, ui: &mut egui::Ui) {
+        ui.heading(t("section-fixtures"));
+        let Some(managed_id) = self.state.managed_club_id else {
+            ui.label(t("fixtures-no-calendar"));
+            return;
+        };
+        let mut own: Vec<Fixture> = self
+            .state
+            .schedule
+            .fixtures
+            .iter()
+            .filter(|fixture| {
+                fixture.home_club_id == managed_id || fixture.away_club_id == managed_id
+            })
+            .copied()
+            .collect();
+        if own.is_empty() {
+            ui.label(t("fixtures-no-calendar"));
+            return;
+        }
+        own.sort_by_key(|fixture| fixture.date);
+        let today = self.state.current_date;
+        let (played, upcoming): (Vec<Fixture>, Vec<Fixture>) =
+            own.into_iter().partition(|fixture| fixture.result.is_some());
+        ui.heading(t("fixtures-results-title"));
+        egui::Grid::new("shell_results_grid")
+            .striped(true)
+            .show(ui, |ui| {
+                for fixture in played.iter().rev() {
+                    ui.label(fixture.date.to_string());
+                    ui.label(self.fixture_line(fixture));
+                    ui.end_row();
+                }
+            });
+        ui.heading(t("fixtures-upcoming-title"));
+        egui::Grid::new("shell_fixtures_grid")
+            .striped(true)
+            .show(ui, |ui| {
+                for fixture in &upcoming {
+                    if fixture.date == today {
+                        ui.label(format!("{} ({})", fixture.date, t("fixtures-today")));
+                    } else {
+                        ui.label(fixture.date.to_string());
+                    }
+                    ui.label(self.fixture_line(fixture));
+                    let due = fixture.date <= today;
+                    if ui
+                        .add_enabled(due, egui::Button::new(t("fixtures-play")))
+                        .clicked()
+                    {
+                        self.play_fixture(*fixture);
+                    }
+                    ui.end_row();
+                }
+            });
+    }
+
+    /// One-line display of a fixture: score when played, versus when not.
+    fn fixture_line(&self, fixture: &Fixture) -> String {
+        let home = self.club_display_name(fixture.home_club_id);
+        let away = self.club_display_name(fixture.away_club_id);
+        match fixture.result {
+            Some(result) => {
+                let home_goals = result.home_goals.to_string();
+                let away_goals = result.away_goals.to_string();
+                tr(
+                    "shell-match-result",
+                    &[
+                        ("home", &home),
+                        ("home_goals", &home_goals),
+                        ("away_goals", &away_goals),
+                        ("away", &away),
+                    ],
+                )
+            }
+            None => tr(
+                "fixtures-versus",
+                &[("home", &home), ("away", &away)],
+            ),
+        }
+    }
+
+    /// Simulate one due fixture with the match engine, record the score
+    /// and report it in the status line.
+    fn play_fixture(&mut self, fixture: Fixture) {
+        let context = MatchContext {
+            home_club_id: fixture.home_club_id,
+            away_club_id: fixture.away_club_id,
+            date: fixture.date,
+            seed: fixture.seed(),
+            home_avg_ca: self.team_avg_ca(fixture.home_club_id),
+            away_avg_ca: self.team_avg_ca(fixture.away_club_id),
+        };
+        let outcome = SimpleMatchEngine.simulate(&context);
+        self.state.schedule.record_result(
+            fixture.date,
+            fixture.home_club_id,
+            fixture.away_club_id,
+            FixtureResult {
+                home_goals: outcome.home_goals,
+                away_goals: outcome.away_goals,
+            },
+        );
+        let played = Fixture {
+            result: Some(FixtureResult {
+                home_goals: outcome.home_goals,
+                away_goals: outcome.away_goals,
+            }),
+            ..fixture
+        };
+        self.status = self.fixture_line(&played);
+    }
+
+    /// Formation picker plus the starting eleven, with best-eleven
+    /// auto-pick. Instructions stay default until their effects are
+    /// reverse-engineered (see `docs/tactics.md`).
+    fn show_tactics_section(&mut self, ui: &mut egui::Ui) {
+        ui.heading(t("section-tactics"));
+        let Some(managed_id) = self.state.managed_club_id else {
+            ui.label(t("tactics-no-squad"));
+            return;
+        };
+        if self.shell.tactics_club_id != Some(managed_id) {
+            self.refresh_tactics_squad(managed_id);
+        }
+        if self.shell.tactics_squad.is_empty() {
+            ui.label(t("tactics-no-squad"));
+            return;
+        }
+        ui.horizontal(|ui| {
+            ui.label(t("tactics-formation"));
+            let mut formation = self.state.tactics.lineup.formation;
+            egui::ComboBox::from_id_salt("tactics_formation")
+                .selected_text(formation.name())
+                .show_ui(ui, |ui| {
+                    for candidate in Formation::ALL {
+                        ui.selectable_value(&mut formation, *candidate, candidate.name());
+                    }
+                });
+            self.state.tactics.lineup.formation = formation;
+            if ui.button(t("tactics-auto-pick")).clicked() {
+                let squad = self.shell.tactics_squad.clone();
+                self.state.tactics = TeamTactics::auto(formation, &squad);
+            }
+        });
+        let count = self.state.tactics.lineup.starting.len().to_string();
+        if self.state.tactics.lineup.validate().is_err() {
+            ui.label(tr("tactics-invalid", &[("count", &count)]));
+        }
+        ui.heading(t("tactics-starters"));
+        egui::Grid::new("shell_tactics_grid")
+            .striped(true)
+            .show(ui, |ui| {
+                for (shirt, id) in self.state.tactics.lineup.starting.clone().iter().enumerate() {
+                    ui.label((shirt + 1).to_string());
+                    ui.label(self.tactics_player_name(*id));
+                    ui.end_row();
+                }
+            });
+    }
+
+    /// Reload the cached squad for the tactics section.
+    fn refresh_tactics_squad(&mut self, club_id: u32) {
+        self.shell.tactics_squad = self
+            .provider
+            .as_ref()
+            .and_then(|provider| provider.get_players_by_club(club_id).ok())
+            .unwrap_or_default();
+        self.shell.tactics_club_id = Some(club_id);
+    }
+
+    /// Display name plus ability of a cached squad player.
+    fn tactics_player_name(&self, player_id: u32) -> String {
+        self.shell
+            .tactics_squad
+            .iter()
+            .find(|player| player.id == player_id)
+            .map(|player| {
+                let ca = player
+                    .current_ability
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| t("missing-value"));
+                format!("{} (CA {ca})", player.full_name())
+            })
+            .unwrap_or_else(|| t("missing-value"))
+    }
+
+    /// Average current ability of a club's eleven: the stored lineup
+    /// for the managed club, a best-eleven auto-pick for AI clubs.
+    fn team_avg_ca(&self, club_id: u32) -> f32 {
+        let players = self
+            .provider
+            .as_ref()
+            .and_then(|provider| provider.get_players_by_club(club_id).ok())
+            .unwrap_or_default();
+        if players.is_empty() {
+            return DEFAULT_AVG_CA;
+        }
+        let ids: Vec<u32> = if Some(club_id) == self.state.managed_club_id
+            && self.state.tactics.lineup.validate().is_ok()
+        {
+            self.state.tactics.lineup.starting.clone()
+        } else {
+            Lineup::auto_pick(Formation::FourFourTwo, &players).starting
+        };
+        let mut total = 0i32;
+        let mut count = 0i32;
+        for id in &ids {
+            if let Some(ca) = players
+                .iter()
+                .find(|player| player.id == *id)
+                .and_then(|player| player.current_ability)
+            {
+                total += i32::from(ca);
+                count += 1;
+            }
+        }
+        if count > 0 {
+            total as f32 / count as f32
+        } else {
+            DEFAULT_AVG_CA
+        }
+    }
+
+    /// Club display name, falling back to the raw id when unknown.
+    fn club_display_name(&self, club_id: u32) -> String {
+        self.clubs
+            .iter()
+            .find(|club| club.id == club_id)
+            .map(|club| club.name.clone())
+            .unwrap_or_else(|| {
+                let id = club_id.to_string();
+                tr("career-unknown-club", &[("id", &id)])
+            })
     }
 
     /// Managed club display name, or `—` when no career is active.
@@ -232,7 +531,7 @@ impl OpenCmApp {
             .managed_club_id
             .and_then(|id| self.clubs.iter().find(|club| club.id == id))
             .map(|club| club.name.clone())
-            .unwrap_or_else(|| "—".to_string())
+            .unwrap_or_else(|| crate::i18n::t("missing-value"))
     }
 
     /// Re-save the active career to the file it was started from or
