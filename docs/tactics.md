@@ -76,5 +76,5 @@ become editable data with the 01/02 behaviour as default — see
 ## Open questions
 
 - Toggle-instruction values, rating-to-slot mapping, per-competition
-  sub caps, captaincy effects, slot legality, preset binary layout:
+  sub caps, captaincy effects, slot legality, preset byte semantics:
   needs playtest plus function-level analysis.

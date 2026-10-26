@@ -76,6 +76,9 @@ playtest or function-level analysis).
 - Squad-status ladder gates contract talks; players reject with
   enumerated reasons; nationality and foreign-player signing bans
   exist (including club-specific matrices). (STRING-EVIDENCE)
+- Player-club interaction verbs: praise, criticise, warn, promise,
+  unsettle, transfer request, transfer listing, trial offers and
+  approach-to-buy. (STRING-EVIDENCE)
 - AI clubs bid, negotiate and withdraw (toggleable).
   (STRING-EVIDENCE)
 

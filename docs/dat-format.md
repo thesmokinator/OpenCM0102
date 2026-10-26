@@ -9,22 +9,13 @@ observation is recorded here with the file name, offset and sample values.
 
 ## Rules
 
-- Observations come from the user's own freeware data, inspected locally.
+- Observations come from the user's own ISO, inspected locally.
   No original file is ever committed to this repository; tests use small
   synthetic fixtures built from the layouts written here.
 - A `.dat` parser may be added under `crates/cm0102-db/src/formats/` only
   for layouts documented in this file. Guessed layouts do not ship.
 
-## Known so far (from idea.md, to be confirmed on real data)
-
-- A full data set ships about twenty `.dat` files; the setup wizard counts
-  them and warns on a mismatch (`EXPECTED_DAT_FILE_COUNT`).
-- Target SQLite schema for players:
-  `players(id, first_name, second_name, club_id, current_ability,
-  potential_ability)` — abilities stay `NULL` until their offsets here are
-  confirmed.
-
-## Observed on the real freeware ISO (23 Oct 2026)
+## Observed on the real ISO (23 Oct 2026)
 
 - The image is an **installer disc** (ISO 9660 + Joliet volume `CM0102`).
   Its filesystem holds 44 files, among them only two `.dat` files:
@@ -62,7 +53,8 @@ independently in Rust. Version 5 layout only:
 ## Record layouts (implemented, verified 23 Oct 2026)
 
 Parser: `crates/cm0102-db/src/formats.rs`, derived empirically from the
-real data and cross-checked against known entities.
+real data and cross-checked against known entities. Counts below are
+3.9.60; 3.9.68 deltas have their own section at the end.
 
 - Name files (`first_names.dat`, `second_names.dat`,
   `common_names.dat`): 60-byte records. Name in bytes 0–50 (NUL padded),
@@ -81,8 +73,9 @@ real data and cross-checked against known entities.
   Blackburn/Bolton/Fulham read 87 = 7 / 91 = 8, Manchester
   City/Coventry/Bradford read 87 = 8 / 91 = 7, and Chievo/Piacenza/
   Torino/Venezia read 87 = 24 / 91 = 25. Small clubs carry bucket
-  values (58/98/101/254, …) whose lower-league encoding is still
-  under analysis; 254 behaves as "none". Neighbor bytes 86/90 are
+  values (58/98/101/254, …) or spill under real league ids — full
+  distribution in [competitions.md](competitions.md); the assignment
+  rule is still open. Neighbor bytes 86/90 are
   separate 0/255 `u8` flags, not part of the league field.
 - `staff.dat`, staff section: 157-byte packed records. The section is
   the run of records whose staff id `i32` at byte 0 equals the record

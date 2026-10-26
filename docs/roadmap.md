@@ -14,16 +14,16 @@ mechanics need playtest or function-level analysis), OPEN.
 
 | System | Spec | Target | Status |
 |---|---|---|---|
-| Data import | [dat-format.md](dat-format.md) | `cm0102-db` | Done; bucket encoding, wage/contract offsets open |
+| Data import | [dat-format.md](dat-format.md) | `cm0102-db` | Done; bucket rule, wage/contract offsets open |
 | Competitions | [competitions.md](competitions.md) | `cm0102-core` competition | Catalog + menu done; bindings open |
 | Match engine | [match-engine-spec.md](match-engine-spec.md) | `cm0102-match` | Placeholder; model open |
 | Transfers | [transfers.md](transfers.md) | `cm0102-core` transfers | Flows mapped; formulas open |
 | Tactics | [tactics.md](tactics.md) | `cm0102-core` tactics | Grids mapped; effects open |
 | Season | [season.md](season.md) | `cm0102-core` season sim | Flows mapped; pipeline open |
 | Players | [players.md](players.md) | `cm0102-core` data | Layout done; semantics open |
-| Saves | [saves.md](saves.md) | app + `cm0102-core` | Native done; original format open |
+| Saves | [saves.md](saves.md) | app + `cm0102-core` | Native done; container solved, payload layouts open |
 | App flows | [user-guide.md](user-guide.md) | app screens | Explorer + career done; rest open |
-| Versions | [versions.md](versions.md) | all specs | Policy set: 3.9.60 data, 3.9.68 behaviour; exe diff open |
+| Versions | [versions.md](versions.md) | all specs | Policy set: 3.9.60 data, 3.9.68 behaviour; playtest diff open |
 
 ## Rules files
 
@@ -32,7 +32,7 @@ All game rules ship as editable data (see "Rules as data" in
 defaults: tiebreak, league, cup, discipline, match, weather, lineup,
 tactics, players, medical, training, morale/condition, career,
 transfers, loans, permits, finance, season, setup, game settings,
-persistence. Each spec doc lists its file's knobs.
+persistence. Each gameplay spec doc lists its file's knobs.
 
 ## Gaps
 
@@ -41,8 +41,9 @@ Closed through analysis (see spec docs for details):
 - Per-league slot counts and sizes, including cup-exclusion proof.
 - Cup draw algorithm: full shuffle, random home/away, bye carry.
 - Referee strictness mapping (Lenient/Strict/Harsh bands).
-- Save sketch: `.mbr` container, versioned header fields, 33
-  temp-file inventory, atomic temp-pack flow.
+- Save container solved: 268-byte file table, byte-RLE payloads,
+  109-file inventory incl. per-competition state, atomic temp-pack
+  flow, localized-DB insight.
 - Full 3.9.60→3.9.68 data diff: counts, nation move/renumbering,
   Asian expansion, Finland fix, NSL reputation, scripted-events
   and weather config formats, record-size stability.
@@ -72,13 +73,46 @@ analysis, or both — details in the per-system specs):
 
 ## Build order
 
-1. League fields import + Premier season loop (fixtures, table).
-2. Faithful match engine v1 behind `MatchEngine`.
-3. Tactics model wired into lineups and matches.
-4. Transfer engine v1 (windows, bids, loans, permits).
-5. Season simulation (board, finance, youth, awards).
-6. Full app flows (leagues, options, holiday, jobs, network later).
-7. Original save compatibility (read, then write).
+Each phase lists its spec, crate target and acceptance criteria.
+A phase is done when the criteria pass and the workspace gate is
+green.
+
+1. **Premier season loop** ([competitions.md](competitions.md),
+   `cm0102-core` competition + `cm0102-db`). Import league
+   fields, generate the 20-team double round robin, apply
+   results to the table. Done when: 380 fixtures scheduled,
+   pro/rel cross-checks (Blackburn/Bolton/Fulham up, City/
+   Coventry/Bradford down) reproduce from the data.
+2. **Faithful match engine v1**
+   ([match-engine-spec.md](match-engine-spec.md), `cm0102-match`).
+   Replace the placeholder behind `MatchEngine`: scorer/penalty/
+   own-goal events, cards with scoped suspensions, 17-column
+   stats, weather postponement hook. Done when: deterministic
+   per seed, event strings match the specified catalogue.
+3. **Tactics model** ([tactics.md](tactics.md), `cm0102-core`
+   tactics). Preset loading (`.pct` structure), 14-row
+   instruction grid, team settings, lineup legality (11, caps,
+   taker/captain rules). Done when: presets round-trip and an
+   illegal lineup is rejected with the specified reason.
+4. **Transfer engine v1** ([transfers.md](transfers.md),
+   `cm0102-core` transfers). Windows/deadlines, offer lifecycle,
+   Bosman compensation, loans, permits, board caps. Done when:
+   scripted `player_setup.cfg` events apply and deadline/loan
+   rules from the spec hold on fixtures.
+5. **Season simulation** ([season.md](season.md),
+   [players.md](players.md), `cm0102-core` season sim). Day-tick
+   pipeline, board ladder, finance, youth intake, awards,
+   news flow. Done when: a scripted season advances with
+   balanced books and the specified board/finance events.
+6. **Full app flows** ([user-guide.md](user-guide.md), app).
+   League screens, options, holiday, jobs, search, editor
+   parity; network last. Done when: the new-career flow runs
+   end to end and every screen has a spec cross-check.
+7. **Original save compatibility** ([saves.md](saves.md), app +
+   `cm0102-core`). Read 3.9.60/3.9.68 saves (container + RLE
+   done; payload layouts as specified), then write 3.9.68.
+   Done when: the sample saves load with identical squads and
+   tables, and our saves load in the original game.
 
 ## Verification
 

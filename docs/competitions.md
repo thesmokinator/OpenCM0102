@@ -8,12 +8,13 @@ imported data; league membership and per-competition rules are under
 analysis and nothing about them may be treated as fact until the
 observation is recorded here.
 
-## Catalog (from the imported data)
+## Catalog (from the imported 3.9.60 data)
 
 409 competitions share one id space: 390 club competitions (from
 `club_comp.dat`) and 19 nation competitions (from `nation_comp.dat`),
 each with a name, short name, code, continent, nation and reputation
-(0–20). Top by reputation:
+(0–20). (3.9.68 grows this to 452 — see
+[dat-format.md](dat-format.md).) Top by reputation:
 
 | ID  | Competition                  | Nation  | Rep |
 |-----|------------------------------|---------|-----|
@@ -110,10 +111,8 @@ need playtest or function-level analysis).
 - League sizes (membership counts by `club.dat` league byte):
   Premier 20, First/Second/Third Division 24 each, Conference 22,
   Serie A 18, German First Division 18, Spanish First Division 20;
-  cups store 0 (league fields only). Small clubs spill into
-  low-value slots (e.g. 12 Australians under Serie B's 25, Turkish
-  second tier under Serie C2/B's 29) and bucket values
-  (101/254/58). (VERIFIED-DATA)
+  cups store 0 (league fields only). Small-club spill and buckets
+  are covered under Membership above. (VERIFIED-DATA)
 - 3.9.68 Asian expansion: 43 new competitions (Indonesia, Singapore,
   Hong Kong, India, Malaysia, Thailand, China, Gulf and Far East
   cups) plus slots 364–389 repurposed to Asian competitions; the
@@ -130,11 +129,20 @@ need playtest or function-level analysis).
   unchanged, so the 3.9.67 "added South Korean league" is a
   playability change (league selection/rules), not new competitions.
   (VERIFIED-DATA)
+- Runtime league state (`<name>_<id>.tmp` in saves) holds 118-byte
+  team slots, club id first, alphabetical (all 18 Serie A clubs
+  verified); all stat fields read zero on a season-start save.
+  Fixtures live in 316-byte records holding competition id,
+  home/away club ids and date/venue fields (partially mapped).
+  Cup state holds packed `u32` entrant arrays (16 Serie A sides
+  verified in Coppa Italia). Ids are save-local (see
+  [saves.md](saves.md)). (VERIFIED-DATA structure; field
+  semantics need a mid-season save)
 
 ## Open questions
 
-- League tiebreaker order, per-league slot counts and points value,
-  per-cup bindings, final venues and legs, qualifying group sizes,
+- League tiebreaker order and points value per league, per-cup
+  bindings, final venues and legs, qualifying group sizes,
   whether reserves/youth are simulated: needs playtest plus
   function-level analysis.
 

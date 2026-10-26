@@ -80,6 +80,14 @@ local exe-string inventory.
   attendance or performance modifier is evidenced.
   (STRING-EVIDENCE)
 
+## Rules surface (editable targets)
+
+Weather zones and seasonal tables, referee strictness bands,
+suspension catalogs, stat columns, man-of-the-match policy and the
+chance/goal model constants must all become editable data with the
+01/02 behaviour as default — see "Rules as data" in
+[architecture.md](architecture.md).
+
 ## Open questions
 
 - Goal/chance model, rating and man-of-the-match formulas, and the

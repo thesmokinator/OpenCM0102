@@ -73,6 +73,10 @@ playtest or function-level analysis).
 - Fixtures can be postponed (manager-requestable) or abandoned
   with result codes; stadiums can expand or relocate.
   (STRING-EVIDENCE)
+- Managers can go on holiday; network play exists with a join
+  flow; game settings cover currency, background pictures and
+  commentary speed; season-ticket income and a Director of
+  Football role exist. (STRING-EVIDENCE)
 
 ## Rules surface (editable targets)
 

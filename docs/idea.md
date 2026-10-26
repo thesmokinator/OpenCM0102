@@ -3,26 +3,24 @@
 
 # OpenCM0102 — Pure Open Engine Skeleton for MuseCode
 
-> **Vision:** Full clean-room reimplementation of Championship Manager 01/02. No Wine, no original exe at runtime. User provides freeware .dat files once, we convert to SQLite, engine runs 100% natively on Windows/macOS/Linux. MIT licensed.
+> **Vision:** Full clean-room reimplementation of Championship Manager 01/02. No Wine, no original exe at runtime. User provides their CM01/02 disc as an ISO image once, we convert to SQLite, engine runs 100% natively on Windows/macOS/Linux. MIT licensed.
 
 ## 0. LEGAL - READ FIRST
 
 - NEVER bundle cm0102.exe, .dat, .cfg, graphics. Repo contains ONLY our code.
-- App flow: On first launch, wizard asks for path to CM01/02 freeware folder -> validate (check 20 .dat) -> import to user data dir -> never touch originals again.
-- Clean-room: Document behavior by playing original game, write spec in docs/, implement from spec. No decompiled code in repo.
+- App flow: On first launch, wizard asks for the CM01/02 ISO image -> read ISO 9660 + InstallShield cabinet -> validate (check 20 .dat) -> import to user data dir -> never touch originals again.
+- Clean-room: Document behavior by observing the original game, write spec in docs/, implement from spec. No decompiled code in repo.
 - Freeware status: Game was released as freeware in Dec 2008 by Eidos - user must own it, we just read its data.
 
 ## 1. Architecture - No Wine
 
-[User Freeware Folder] -> [Importer] -> [SQLite DB] -> [Open Engine] -> Native Binaries
+[User ISO] -> [Importer] -> [SQLite DB] -> [Open Engine] -> Native Binaries
 
 Open Engine Modules:
     - db: DataProvider trait, SQLite impl
     - core: GameState, Calendar, CompetitionEngine, TransferEngine
     - match: MatchEngine trait, Sim v1 (text events), later v2
-    - sim: SeasonSimulator
-    - ui: egui (immediate mode) replicating classic CM UI but resizable, 4K
-    - platform: paths, saves, config
+    - app: egui UI (immediate mode) replicating classic CM UI but resizable, screens, saves, platform paths
 
 ## 2. Tech Stack - Pure Native
 
@@ -70,12 +68,12 @@ TASK 7: Saves - JSON + sqlite snapshot
 
 ## 6. MVP Definition of Done
 
-- [ ] Picks freeware folder, imports to SQLite
-- [ ] Shows 【entity-Arsenal¦canonical_name=Arsenal】 01/02 squad
+- [x] Picks ISO image, imports to SQLite
+- [x] Shows Arsenal 01/02 squad
 - [ ] Continue 10 times updates table
 - [ ] View Match shows "12' Henry scores!"
-- [ ] Runs natively Win/Mac/Linux - no Wine
-- [ ] No original files bundled
+- [x] Runs natively Win/Mac/Linux - no Wine
+- [x] No original files bundled
 
 ## 7. Prompt for MuseCode
 
