@@ -23,6 +23,7 @@ mechanics need playtest or function-level analysis), OPEN.
 | Players | [players.md](players.md) | `cm0102-core` data | Layout done; semantics open |
 | Saves | [saves.md](saves.md) | app + `cm0102-core` | Native done; original format open |
 | App flows | [user-guide.md](user-guide.md) | app screens | Explorer + career done; rest open |
+| Versions | [versions.md](versions.md) | all specs | Policy set: 3.9.60 data, 3.9.68 behaviour; exe diff open |
 
 ## Rules files
 
@@ -56,6 +57,8 @@ analysis, or both — details in the per-system specs):
 8. Regen/intake dates and generation rules.
 9. Byte-level save confirmation (needs user-supplied saves).
 10. New-game screen order and rollover UX.
+11. 3.9.60-vs-3.9.68 code-level behaviour diff (strings diff and
+    official history done — needs playtest observation).
 
 ## Build order
 

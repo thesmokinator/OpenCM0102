@@ -75,7 +75,8 @@ constants must live in editable data files shipped with the app,
 not hardcoded in Rust. Rationale: real-world rules change across
 seasons, and players should be able to update or mod them without
 touching code. The default files ship the 01/02 season exactly as
-observed and specified in `docs/`; the engines only read them.
+observed and specified in `docs/`, following the v3.9.68 behaviour
+target (see [versions.md](versions.md)); the engines only read them.
 
 ## Conventions
 

@@ -20,7 +20,9 @@ end to end today.
 ## Original save compatibility (planned, bidirectional)
 
 Goal: load a save written by the original CM 01/02 into OpenCM0102,
-and write saves the original game accepts. Ground rules:
+and write saves the original game accepts. The format target is
+v3.9.68 (see [versions.md](versions.md)): most saves in circulation
+are that version. Ground rules:
 
 - The format is recovered **empirically from user-supplied save
   files** (same method as [dat-format.md](dat-format.md)): layout

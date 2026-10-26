@@ -109,3 +109,14 @@ need playtest or function-level analysis).
   per-cup bindings, final venues and legs, qualifying group sizes,
   whether reserves/youth are simulated: needs playtest plus
   function-level analysis.
+
+## Version notes (3.9.68)
+
+Behaviour target is v3.9.68 (see [versions.md](versions.md)). The
+patch fixed competition bugs whose 3.9.60 form must NOT be
+reproduced: the England/Conference/Scotland selection interplay,
+Australian NSL team and foreign-player counts, Polish First Division
+relegations, the Argentine Second Division format, and the Finnish
+Premier Division membership (data-side). Per-competition rules land
+here only in their fixed form, once confirmed against the patched
+game.
