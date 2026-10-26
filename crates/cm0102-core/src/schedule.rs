@@ -11,6 +11,7 @@
 //! (first round date, spacing, legs) to absorb them as editable rules.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::calendar::GameDate;
 use crate::data::Club;
@@ -43,6 +44,67 @@ pub struct FixtureResult {
     pub home_goals: u32,
     /// Goals scored by the away club.
     pub away_goals: u32,
+}
+
+/// Points awarded per result. Three for a win is the assumed 01/02
+/// default; the value is data so the observed rule replaces it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TableRules {
+    /// Points for a win.
+    pub points_win: u32,
+    /// Points for a draw.
+    pub points_draw: u32,
+}
+
+impl Default for TableRules {
+    fn default() -> Self {
+        Self {
+            points_win: 3,
+            points_draw: 1,
+        }
+    }
+}
+
+/// One league-table row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TableRow {
+    /// Club id.
+    pub club_id: u32,
+    /// Games played.
+    pub played: u32,
+    /// Games won.
+    pub won: u32,
+    /// Games drawn.
+    pub drawn: u32,
+    /// Games lost.
+    pub lost: u32,
+    /// Goals scored.
+    pub goals_for: u32,
+    /// Goals conceded.
+    pub goals_against: u32,
+    /// Points.
+    pub points: u32,
+}
+
+impl TableRow {
+    /// Zero row for `club_id`.
+    pub fn new(club_id: u32) -> Self {
+        Self {
+            club_id,
+            played: 0,
+            won: 0,
+            drawn: 0,
+            lost: 0,
+            goals_for: 0,
+            goals_against: 0,
+            points: 0,
+        }
+    }
+
+    /// Goals scored minus goals conceded.
+    pub fn goal_difference(self) -> i32 {
+        self.goals_for as i32 - self.goals_against as i32
+    }
 }
 
 /// One dated fixture between two clubs.
@@ -213,6 +275,65 @@ impl Schedule {
     /// over and next year's calendar must be generated.
     pub fn is_exhausted(&self, date: GameDate) -> bool {
         self.last_date().map_or(true, |last| last < date)
+    }
+
+    /// League table over `members` from played fixtures. Unplayed
+    /// fixtures and fixtures outside the group are ignored; members
+    /// without played games get a zero row. Sorted by points, goal
+    /// difference, goals scored — the ordering is provisional until
+    /// the tiebreak rules are observed (see `docs/competitions.md`).
+    pub fn league_table(members: &[u32], fixtures: &[Fixture], rules: &TableRules) -> Vec<TableRow> {
+        let mut rows: HashMap<u32, TableRow> = members
+            .iter()
+            .map(|id| (*id, TableRow::new(*id)))
+            .collect();
+        for fixture in fixtures {
+            let Some(result) = fixture.result else {
+                continue;
+            };
+            if !rows.contains_key(&fixture.home_club_id)
+                || !rows.contains_key(&fixture.away_club_id)
+            {
+                continue;
+            }
+            for (id, scored, conceded) in [
+                (
+                    fixture.home_club_id,
+                    result.home_goals,
+                    result.away_goals,
+                ),
+                (
+                    fixture.away_club_id,
+                    result.away_goals,
+                    result.home_goals,
+                ),
+            ] {
+                let row = rows.get_mut(&id).expect("membership checked");
+                row.played += 1;
+                row.goals_for += scored;
+                row.goals_against += conceded;
+                match scored.cmp(&conceded) {
+                    std::cmp::Ordering::Greater => {
+                        row.won += 1;
+                        row.points += rules.points_win;
+                    }
+                    std::cmp::Ordering::Less => row.lost += 1,
+                    std::cmp::Ordering::Equal => {
+                        row.drawn += 1;
+                        row.points += rules.points_draw;
+                    }
+                }
+            }
+        }
+        let mut table: Vec<TableRow> = rows.into_values().collect();
+        table.sort_by(|a, b| {
+            b.points
+                .cmp(&a.points)
+                .then(b.goal_difference().cmp(&a.goal_difference()))
+                .then(b.goals_for.cmp(&a.goals_for))
+                .then(a.club_id.cmp(&b.club_id))
+        });
+        table
     }
 
     /// Next season's calendar covering `from`: generates from `from`'s
@@ -527,6 +648,43 @@ mod tests {
     fn first_round_moves_year_by_year() {
         assert_eq!(first_round_for_year(2001), GameDate::new(2001, 8, 18));
         assert_eq!(first_round_for_year(2005), GameDate::new(2005, 8, 18));
+    }
+
+    /// Tables count only played in-group fixtures, sorted by the
+    /// provisional Pts/GD/GF order with zero rows for the rest.
+    #[test]
+    fn league_table_counts_and_sorts() {
+        let date = GameDate::SEASON_START;
+        let played = |home: u32, away: u32, hs: u32, as_: u32| Fixture {
+            date,
+            home_club_id: home,
+            away_club_id: away,
+            competition_id: 7,
+            result: Some(FixtureResult {
+                home_goals: hs,
+                away_goals: as_,
+            }),
+        };
+        let fixtures = vec![
+            played(1, 2, 2, 0),
+            played(3, 4, 1, 1),
+            Fixture {
+                date,
+                home_club_id: 1,
+                away_club_id: 3,
+                competition_id: 7,
+                result: None,
+            },
+            played(1, 9, 5, 0),
+        ];
+        let table = Schedule::league_table(&[1, 2, 3, 4], &fixtures, &TableRules::default());
+        let order: Vec<u32> = table.iter().map(|row| row.club_id).collect();
+        assert_eq!(order, vec![1, 3, 4, 2]);
+        assert_eq!(table[0].points, 3);
+        assert_eq!(table[0].goal_difference(), 2);
+        assert_eq!(table[1].points, 1);
+        assert_eq!(table[3].played, 1);
+        assert_eq!(table[3].points, 0);
     }
 
     /// Seeds are stable per fixture and differ across fixtures.

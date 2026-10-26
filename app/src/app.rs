@@ -235,6 +235,7 @@ impl OpenCmApp {
         let schedule = self.state.schedule.clone();
         let had_calendar = !schedule.fixtures.is_empty();
         let outcome = continue_until_event(&mut self.state, &ContinueRules::default(), &schedule);
+        self.simulate_other_matches();
         let date = self.state.current_date.to_string();
         let reason = if had_calendar {
             match outcome.stop {

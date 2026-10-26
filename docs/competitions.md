@@ -59,7 +59,8 @@ original game before it lands here:
 
 - Leagues: fixture format (home/away legs), points for a win,
   tiebreaker order, promotion/relegation slots and play-offs,
-  prize money.
+  prize money. (Implemented provisionally as 3/1/0 with
+  points–goal difference–goals scored order until observed.)
 - Domestic cups: rounds, byes and seeding, one or two legs,
   replays, extra time, away goals and penalty order, final venue,
   qualification reward.

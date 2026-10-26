@@ -9,7 +9,7 @@
 
 use cm0102_core::{
     Fixture, FixtureResult, Formation, Lineup, MatchContext, MatchEngine, Player, SavedCareer,
-    TeamTactics, process_day,
+    Schedule, TableRules, TeamTactics, process_day,
 };
 use cm0102_match::SimpleMatchEngine;
 
@@ -129,6 +129,8 @@ pub struct ShellState {
     pub tactics_club_id: Option<u32>,
     /// Cached managed-club squad for the tactics section.
     pub tactics_squad: Vec<Player>,
+    /// Armed starter slot awaiting a swap, if any.
+    pub tactics_selected: Option<usize>,
 }
 
 impl OpenCmApp {
@@ -168,6 +170,7 @@ impl OpenCmApp {
                 for _ in 0..7 {
                     process_day(&mut self.state, &schedule);
                 }
+                self.simulate_other_matches();
                 self.rollover_calendar_if_needed();
                 self.status = tr(
                     "shell-holidayed-to",
@@ -244,6 +247,7 @@ impl OpenCmApp {
             GameSection::Squad => self.show_squad_section(ui),
             GameSection::Tactics => self.show_tactics_section(ui),
             GameSection::Fixtures => self.show_fixtures_section(ui),
+            GameSection::LeagueTable => self.show_table_section(ui),
             section => {
                 ui.heading(section.label());
                 ui.label(tr("shell-not-implemented", &[("spec", section.spec())]));
@@ -346,6 +350,84 @@ impl OpenCmApp {
             });
     }
 
+    /// League table of the managed club's group from played results.
+    /// Fills in as matches are played; other clubs' results arrive
+    /// with automatic simulation.
+    fn show_table_section(&mut self, ui: &mut egui::Ui) {
+        ui.heading(t("section-league-table"));
+        let members: Vec<u32> = self.league_member_ids();
+        if members.is_empty() {
+            ui.label(t("fixtures-no-calendar"));
+            return;
+        }
+        let table = Schedule::league_table(
+            &members,
+            &self.state.schedule.fixtures,
+            &TableRules::default(),
+        );
+        let managed = self.state.managed_club_id;
+        egui::Grid::new("shell_table_grid")
+            .striped(true)
+            .show(ui, |ui| {
+                for key in [
+                    "table-th-pos",
+                    "table-th-club",
+                    "table-th-p",
+                    "table-th-w",
+                    "table-th-d",
+                    "table-th-l",
+                    "table-th-gf",
+                    "table-th-ga",
+                    "table-th-gd",
+                    "table-th-pts",
+                ] {
+                    ui.strong(t(key));
+                }
+                ui.end_row();
+                for (pos, row) in table.iter().enumerate() {
+                    let highlight = managed == Some(row.club_id);
+                    let mut cell = |text: String| {
+                        if highlight {
+                            ui.colored_label(egui::Color32::YELLOW, text);
+                        } else {
+                            ui.label(text);
+                        }
+                    };
+                    cell((pos + 1).to_string());
+                    cell(self.club_display_name(row.club_id));
+                    cell(row.played.to_string());
+                    cell(row.won.to_string());
+                    cell(row.drawn.to_string());
+                    cell(row.lost.to_string());
+                    cell(row.goals_for.to_string());
+                    cell(row.goals_against.to_string());
+                    cell(row.goal_difference().to_string());
+                    cell(row.points.to_string());
+                    ui.end_row();
+                }
+            });
+    }
+
+    /// Club ids sharing the managed club's league slot, if any.
+    fn league_member_ids(&self) -> Vec<u32> {
+        let Some(managed_id) = self.state.managed_club_id else {
+            return Vec::new();
+        };
+        let Some(slot) = self
+            .clubs
+            .iter()
+            .find(|club| club.id == managed_id)
+            .and_then(|club| club.league_id)
+        else {
+            return Vec::new();
+        };
+        self.clubs
+            .iter()
+            .filter(|club| club.league_id == Some(slot))
+            .map(|club| club.id)
+            .collect()
+    }
+
     /// One-line display of a fixture: score when played, versus when not.
     fn fixture_line(&self, fixture: &Fixture) -> String {
         let home = self.club_display_name(fixture.home_club_id);
@@ -432,6 +514,7 @@ impl OpenCmApp {
             if ui.button(t("tactics-auto-pick")).clicked() {
                 let squad = self.shell.tactics_squad.clone();
                 self.state.tactics = TeamTactics::auto(formation, &squad);
+                self.shell.tactics_selected = None;
             }
         });
         let count = self.state.tactics.lineup.starting.len().to_string();
@@ -439,13 +522,60 @@ impl OpenCmApp {
             ui.label(tr("tactics-invalid", &[("count", &count)]));
         }
         ui.heading(t("tactics-starters"));
+        let rows: Vec<(usize, u32, String)> = self
+            .state
+            .tactics
+            .lineup
+            .starting
+            .clone()
+            .iter()
+            .enumerate()
+            .map(|(shirt, id)| (shirt, *id, self.tactics_player_name(*id)))
+            .collect();
         egui::Grid::new("shell_tactics_grid")
             .striped(true)
             .show(ui, |ui| {
-                for (shirt, id) in self.state.tactics.lineup.starting.clone().iter().enumerate() {
+                for (shirt, _id, name) in &rows {
                     ui.label((shirt + 1).to_string());
-                    ui.label(self.tactics_player_name(*id));
+                    let armed = self.shell.tactics_selected == Some(*shirt);
+                    if ui.selectable_label(armed, name).clicked() {
+                        self.shell.tactics_selected =
+                            if armed { None } else { Some(*shirt) };
+                    }
                     ui.end_row();
+                }
+            });
+        ui.heading(t("tactics-reserves"));
+        ui.small(t("tactics-pick-hint"));
+        let starting = self.state.tactics.lineup.starting.clone();
+        let reserves: Vec<Player> = self
+            .shell
+            .tactics_squad
+            .iter()
+            .filter(|player| player.is_player && !starting.contains(&player.id))
+            .cloned()
+            .collect();
+        egui::ScrollArea::vertical()
+            .max_height(200.0)
+            .show(ui, |ui| {
+                for player in &reserves {
+                    let ca = player
+                        .current_ability
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| t("missing-value"));
+                    if ui
+                        .selectable_label(false, format!("{} (CA {ca})", player.full_name()))
+                        .clicked()
+                    {
+                        if let Some(slot) = self.shell.tactics_selected {
+                            if let Some(pick) =
+                                self.state.tactics.lineup.starting.get_mut(slot)
+                            {
+                                *pick = player.id;
+                            }
+                            self.shell.tactics_selected = None;
+                        }
+                    }
                 }
             });
     }
@@ -479,6 +609,18 @@ impl OpenCmApp {
     /// Average current ability of a club's eleven: the stored lineup
     /// for the managed club, a best-eleven auto-pick for AI clubs.
     fn team_avg_ca(&self, club_id: u32) -> f32 {
+        self.team_avg_ca_cached(club_id, &mut std::collections::HashMap::new())
+    }
+
+    /// Cached variant for batch simulation across many fixtures.
+    fn team_avg_ca_cached(
+        &self,
+        club_id: u32,
+        cache: &mut std::collections::HashMap<u32, f32>,
+    ) -> f32 {
+        if let Some(avg) = cache.get(&club_id) {
+            return *avg;
+        }
         let players = self
             .provider
             .as_ref()
@@ -506,10 +648,55 @@ impl OpenCmApp {
                 count += 1;
             }
         }
-        if count > 0 {
+        let avg = if count > 0 {
             total as f32 / count as f32
         } else {
             DEFAULT_AVG_CA
+        };
+        cache.insert(club_id, avg);
+        avg
+    }
+
+    /// Simulate every due AI fixture: unplayed, dated today or
+    /// earlier, not involving the managed club. The manager's own
+    /// matches are never touched — overdue ones stay playable.
+    pub(super) fn simulate_other_matches(&mut self) {
+        let today = self.state.current_date;
+        let managed = self.state.managed_club_id;
+        let due: Vec<Fixture> = self
+            .state
+            .schedule
+            .fixtures
+            .iter()
+            .filter(|fixture| {
+                fixture.result.is_none()
+                    && fixture.date <= today
+                    && !managed.is_some_and(|id| {
+                        fixture.home_club_id == id || fixture.away_club_id == id
+                    })
+            })
+            .copied()
+            .collect();
+        let mut strengths = std::collections::HashMap::new();
+        for fixture in due {
+            let context = MatchContext {
+                home_club_id: fixture.home_club_id,
+                away_club_id: fixture.away_club_id,
+                date: fixture.date,
+                seed: fixture.seed(),
+                home_avg_ca: self.team_avg_ca_cached(fixture.home_club_id, &mut strengths),
+                away_avg_ca: self.team_avg_ca_cached(fixture.away_club_id, &mut strengths),
+            };
+            let outcome = SimpleMatchEngine.simulate(&context);
+            self.state.schedule.record_result(
+                fixture.date,
+                fixture.home_club_id,
+                fixture.away_club_id,
+                FixtureResult {
+                    home_goals: outcome.home_goals,
+                    away_goals: outcome.away_goals,
+                },
+            );
         }
     }
 

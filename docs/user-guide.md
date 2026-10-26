@@ -111,12 +111,15 @@ Transfers, Finances & Info, Board, Staff, Search, News, History,
 Records, Awards, Club Info. Squad shows the managed club's real
 squad, Fixtures shows your league results and upcoming rounds,
 and Tactics shows your formation and starting eleven (auto-picked
-by ability, changeable formation): press Continue to reach the
-first match day — the next match is always shown under the top
-bar — open Fixtures and **Play** the match. The score is
-simulated from the relative strength of the two elevens and
-recorded. When the season's fixtures run out, next year's calendar
-generates automatically. Every other section is an honest placeholder
+by ability, changeable formation, click-to-swap with reserves):
+press Continue to reach the first match day — the next match is
+always shown under the top bar — open Fixtures and **Play** the
+match. The score is simulated from the relative strength of the
+two elevens and recorded, while every other due fixture is
+simulated automatically; the League Table section shows the
+standings from all played results. When the season's fixtures run
+out, next year's calendar generates automatically. Every other
+section is an honest placeholder
 citing the spec in `docs/` that will back it, implemented phase
 by phase (see [roadmap.md](roadmap.md)).
 
