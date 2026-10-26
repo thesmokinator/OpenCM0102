@@ -102,6 +102,22 @@ need playtest or function-level analysis).
   low-value slots (e.g. 12 Australians under Serie B's 25, Turkish
   second tier under Serie C2/B's 29) and bucket values
   (101/254/58). (VERIFIED-DATA)
+- 3.9.68 Asian expansion: 43 new competitions (Indonesia, Singapore,
+  Hong Kong, India, Malaysia, Thailand, China, Gulf and Far East
+  cups) plus slots 364–389 repurposed to Asian competitions; the
+  Arab cups move to 373–377; 'Chinese Super Cup' becomes 'Chinese
+  FA Super Cup'. (VERIFIED-DATA, patched bytes)
+- 3.9.68 Finland fix: the 19 Yugoslav clubs wrongly parked under
+  the Finnish Premier Division (id 114) in 3.9.60 are gone; the
+  slot holds the 12 correct 2002 Veikkausliiga clubs (plus
+  bucket-sharing minnows — the spill encoding still applies).
+  (VERIFIED-DATA, patched bytes)
+- 3.9.68 reputation tweaks: Australian NSL 6→8, Oceania Champions
+  Cup 6→7, NSW and Victorian leagues 1→2. (VERIFIED-DATA)
+- Korean and Japanese competitions already exist in 3.9.60 data
+  unchanged, so the 3.9.67 "added South Korean league" is a
+  playability change (league selection/rules), not new competitions.
+  (VERIFIED-DATA)
 
 ## Open questions
 

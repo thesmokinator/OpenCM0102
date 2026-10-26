@@ -35,6 +35,17 @@ implemented:
 - `staff_history.dat` spans 1984–2001 with 270,654 rows; reference
   tables hold 3,124 officials, 7,096 stadiums, 5,418 cities,
   6 continents.
+- `player_setup.cfg` scripts season-start events: retirements
+  (`"RETIREMENT" ... "Manchester United" 23 7 2002`),
+  international retirements, injuries (`"INJURY" ...
+  "PERMANENT_HIP_INJURY" 15`), manager confidences, plus rare
+  doping (`NANDROLONE`), false-passport and misconduct entries.
+  The 02/03 update trims most 01/02-specific lines (injuries
+  534→184, international retirements 147→49). (VERIFIED-DATA,
+  config text)
+- International 'B' and Under-21 management requires the nation to
+  have over 400 active players in the database and is optional via
+  'control all teams' (per the shipped SI release notes).
 
 ## Findings
 

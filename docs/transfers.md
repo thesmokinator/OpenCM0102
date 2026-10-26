@@ -32,6 +32,14 @@ implemented:
 - Data facts: `staff_history.dat` records a loan flag plus
   appearances and goals (7,637 of 270,654 rows on loan); player
   records carry a squad number (see [dat-format.md](dat-format.md)).
+- Scripted setup events live in `player_setup.cfg` as quoted
+  commands naming the person and clubs, e.g. `"FUTURE_TRANSFER"
+  "Steinar" "" "Pedersen" "IFK Göteborg" "IK Start" 01 12 2001
+  0 -1 4` and `"LOAN" "Andrey" "Demkine" "Demkin" "Germinal
+  Beerschot Antwerpen" "KSK Beveren" 01 07 2001 30 06 2002`.
+  The 3.9.60 file holds 36 future transfers and 1,471 loans; the
+  3.9.68 file (02/03 data) drops scripted future transfers and
+  keeps 56 loans. (VERIFIED-DATA, config text)
 
 ## Findings
 

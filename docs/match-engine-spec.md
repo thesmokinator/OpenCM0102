@@ -59,6 +59,14 @@ local exe-string inventory.
   pitch states driving postponement and mid-match abandonment, with
   league-table flags; undersoil heating protects fixtures but can
   fail. (STRING-EVIDENCE)
+- `weather.cfg` defines 44 climate zones (id + name, many with
+  Köppen codes, e.g. `8 Caf - Tokyo`; 3.9.68 inserts zone 41
+  `South East Asia Tropical`). Each zone has four season lines
+  (SPRING/SUMMER/AUTUMN/WINTER) giving the season start day plus
+  cumulative probability tables for Wind (Calm/Breezy/Gusty/
+  Strong/Gale), Precipitation (Dry/Wet/Drizzle/Shower/Down Pour)
+  and Warmth (Freezing/Cold/Mild/Fine/Warm/Hot/Very Hot).
+  (VERIFIED-DATA, config text; gameplay modifiers still open)
 - Referees are database entities (`officials`, 3,124 rows) with a
   stats screen and an FA complaint flow. (VERIFIED-DATA +
   STRING-EVIDENCE)

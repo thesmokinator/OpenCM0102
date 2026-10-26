@@ -161,3 +161,46 @@ TransferTool structures and known entities on the real file:
 is an index by-product and the second ships runtime pointers rather
 than data in this version; both remain visible in the imported file
 inventory (`source_files`).
+
+## 3.9.68 data deltas (VERIFIED-DATA, patched bytes)
+
+The patch ships full replacements for the database files below; all
+record sizes are unchanged (verified by exact section accounting,
+e.g. staff sections sum to the byte). Counts 3.9.60 → 3.9.68:
+
+| File | 3.9.60 | 3.9.68 |
+|---|---|---|
+| `club.dat` | 10,580 | 13,214 |
+| `staff.dat` persons | 132,722 | 169,342 |
+| player records | 109,940 | 139,769 |
+| non-player records | 23,785 | 30,865 |
+| `city.dat` | 5,418 | 6,682 |
+| `stadium.dat` | 7,096 | 8,917 |
+| `officials.dat` | 3,124 | 4,567 |
+| `first_names.dat` | 34,363 | 44,281 |
+| `second_names.dat` | 82,338 | 104,395 |
+| `common_names.dat` | 8,493 | 13,256 |
+| `club_comp.dat` | 390 | 433 |
+| `staff_comp.dat` | 542 | 543 |
+| `club_comp_history.dat` rows | 7,194 | 10,766 |
+| `nation_comp_history.dat` rows | 143 | 273 |
+| `staff_history.dat` rows | 270,654 | 385,846 |
+| `staff_comp_history.dat` rows | 1,998 | 2,609 |
+
+Structural notes:
+
+- Record ids are positional, not stable across data versions: e.g.
+  West Ham United is club 10,224 in 3.9.60 but 12,765 in 3.9.68.
+  Importers must resolve by name, never hardcode ids.
+- Taiwan is renamed to Chinese Taipei and moves from nation slot 183
+  to slot 43; nations 43–182 shift up by one and every nation
+  reference (competitions, cities, staff) is renumbered to match.
+- `club_comp.dat` grows by 43 Asian competitions and repurposes
+  slots 364–389 (Arab cups move to 373–377); see
+  [competitions.md](competitions.md).
+- `nation_comp.dat` is reordered ('B' and Under-21 internationals
+  move to the front) with the same 19 entries.
+- Not shipped by the patch (3.9.60 bytes stay current):
+  `events_*.cfg`, `euro.cfg`, `fancluburls.txt`, `pundit.cfg`,
+  `si.rgn`, `Cpuinf32.dll`, `game.mbr`/`match.mbr` templates,
+  `language.ldb`.

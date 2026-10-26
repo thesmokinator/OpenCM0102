@@ -43,6 +43,12 @@ Closed through analysis (see spec docs for details):
 - Referee strictness mapping (Lenient/Strict/Harsh bands).
 - Save sketch: `.mbr` container, versioned header fields, 33
   temp-file inventory, atomic temp-pack flow.
+- Full 3.9.60→3.9.68 data diff: counts, nation move/renumbering,
+  Asian expansion, Finland fix, NSL reputation, scripted-events
+  and weather config formats, record-size stability.
+- Patch container fully mapped; both 3.9.68 executables recovered
+  and string-diffed (Korean/Japanese content, new languages, save
+  version validation, playoff news rework).
 
 Still open (each needs playtest observation, function-level
 analysis, or both — details in the per-system specs):
@@ -57,8 +63,10 @@ analysis, or both — details in the per-system specs):
 8. Regen/intake dates and generation rules.
 9. Byte-level save confirmation (needs user-supplied saves).
 10. New-game screen order and rollover UX.
-11. 3.9.60-vs-3.9.68 code-level behaviour diff (strings diff and
-    official history done — needs playtest observation).
+11. Exe-side 3.9.68 fixes (free-kick chance, MoM logic, interest
+    severity, selection interplay, West Ham mechanism, ARSE):
+    needs playtest observation on the patched game.
+12. Lower-league bucket/spill encoding for small clubs.
 
 ## Build order
 

@@ -29,16 +29,22 @@ aging-player move logic (transfers); Asian Super Cup second-leg gap
 and Pakistan's section (competitions); `nomemcheck` option,
 club-records and news-corruption repairs (saves/app).
 
-**3.9.67**: South Korean league added (competitions); player/team
-data updated to 02/03 with the season start unchanged (data).
+**3.9.67**: South Korean league made playable (the competitions
+already exist in 3.9.60 data, so this is selection/rules, not new
+entries); player/team data updated to 02/03 with the season start
+unchanged — clubs 10,580→13,214, persons 132,722→169,342, plus
+43 new Asian competitions (see [dat-format.md](dat-format.md)).
 
-**3.9.68**: West Ham strikers and Finnish membership (data-side);
-England/Conference/Scotland interplay, Australian NSL counts,
-Polish relegations, Argentine Second Division (competitions);
-Team-of-the-Week surnames (original UI bug — not reproduced, our UI
-is new); language support incl. Chinese, Brazilian Portuguese and
-Mexican Spanish (i18n — English-first for us); Korean media strings
-and data; ARSE command (unidentified — open).
+**3.9.68**: West Ham strikers (no duplicated staff rows found — fix
+mechanism still open, likely engine-side) and Finnish membership
+(Yugoslav contamination removed — confirmed data-side);
+England/Conference/Scotland interplay, Australian NSL counts (plus
+NSL reputation 6→8), Polish relegations, Argentine Second Division
+(competitions); Team-of-the-Week surnames (original UI bug — not
+reproduced, our UI is new); language support incl. Chinese,
+Brazilian Portuguese and Mexican Spanish (i18n — English-first for
+us); Korean media strings and data; ARSE command (unidentified —
+open).
 
 Confirmed on the patched executable's shipped text: South Korean
 and Japanese league content, the new languages, and a save-version
