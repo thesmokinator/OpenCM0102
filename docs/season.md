@@ -27,21 +27,51 @@ implemented:
 
 ## Verified so far
 
-- New games are assumed to start 1 July 2001 (current engine
-  convention — to confirm per league against the original).
-- Staff job codes 11 (player) and 5 (manager) are verified; other
-  roles are open (see [dat-format.md](dat-format.md)).
-- `staff_history.dat` tracks appearances and goals per
-  staff/year/club. Nothing else seasonal is verified yet.
+- New games start 1 July 2001 (engine convention, consistent with
+  the 1–31 July pre-season window).
+- Staff job codes 11 (player) and 5 (manager) are verified; 17
+  codes exist in total, the rest unlabeled (see
+  [dat-format.md](dat-format.md)).
+- `staff_history.dat` spans 1984–2001 with 270,654 rows; reference
+  tables hold 3,124 officials, 7,096 stadiums, 5,418 cities,
+  6 continents.
+
+## Findings
+
+Evidence levels: VERIFIED-DATA (imported bytes) vs STRING-EVIDENCE
+(shipped UI text: proves the feature exists, formulas still need
+playtest or function-level analysis).
+
+- Board confidence is a graded message ladder driven by form
+  streaks, ending in sacking with enumerated causes (results,
+  league position, supporter pressure, expensive squad, staff
+  relations); boards publish season expectations.
+  (STRING-EVIDENCE)
+- Club, international and under-21 jobs are playable; vacancies are
+  engine objects with apply/acknowledge/dismiss flow; managers can
+  resign. (STRING-EVIDENCE)
+- Money: wage-budget requests, sponsor events, season tickets, bank
+  balance, and a debt-to-receivership distress path.
+  (STRING-EVIDENCE)
+- Youth pipeline: scout search, coach verdicts, promotion to
+  reserve or B team; retirement and regen systems are adjacent.
+  (STRING-EVIDENCE)
+- Awards run per competition and nation with votes, shortlists and
+  a persisted roll of honour; records are tracked per club.
+  (STRING-EVIDENCE)
+- Fixtures can be postponed (manager-requestable) or abandoned
+  with result codes; stadiums can expand or relocate.
+  (STRING-EVIDENCE)
 
 ## Rules surface (editable targets)
 
-Calendar dates, financial parameters and board strictness should
+Calendar dates, board strictness, finance parameters, job rules,
+youth and regen scheduling, awards and fixture policies should all
 become editable data with the 01/02 behaviour as default — see
 "Rules as data" in [architecture.md](architecture.md).
 
 ## Open questions
 
-- Full per-item behaviour, verified by observing the original game
-  across at least one full season (board messages, finances,
-  intake dates, award winners).
+- Day-tick pipeline order, intake/regen rules, inbox flow, finance
+  formulas, job labels, friendlies: needs playtest plus
+  function-level analysis.

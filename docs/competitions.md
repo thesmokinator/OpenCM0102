@@ -60,3 +60,52 @@ original game before it lands here:
 Once specified, every rule becomes an editable data file with the
 01/02 season as default — see "Rules as data" in
 [architecture.md](architecture.md).
+
+## Findings
+
+Evidence levels: VERIFIED-DATA (imported bytes) vs STRING-EVIDENCE
+(shipped UI text: proves the feature exists, exact bindings still
+need playtest or function-level analysis).
+
+- Tiebreak menu is data-driven per round: replay, extra time,
+  golden-goal extra time, away goals (post-90 or post-extra-time),
+  penalties, US-style shoot-out, higher-seeding progression, and a
+  best-over-3-matches series. (STRING-EVIDENCE)
+- Points for a win is a per-competition 2-or-3 knob ("Two"/"Three"
+  labels); Argentina relegates on a 3-season points average.
+  (STRING-EVIDENCE)
+- League tiebreak criteria name Games Won, Goals For and Goal
+  Difference; their order is still open. (STRING-EVIDENCE)
+- Promotion and relegation playoffs exist (numbered promotion
+  ladders, relegation playoffs, playoff groups), and promotion can
+  be vetoed when the stadium is below required capacity.
+  (STRING-EVIDENCE)
+- Generic cup engine: pre/qualifying/numbered rounds through
+  quarter/semi/final, each with first/second leg, replay(s) and
+  decider variants; draws are dated events with automatic mode and
+  byes; ties can be on neutral ground. Draws fully shuffle the
+  entrants, assign home/away per tie at random, and carry byes
+  through. (STRING-EVIDENCE; distribution to confirm by playtest.)
+- Prize money binds to six triggers: match win, match draw, final
+  position, round qualification, title, runners-up; amounts are
+  per-competition data. (STRING-EVIDENCE)
+- 01/02 European Cup: three two-legged qualifying phases, Phase 1
+  groups A–H, Phase 2 groups A–D, with squad registration caps.
+  (STRING-EVIDENCE)
+- Cup Winners' Cup history ends in 1999 (defunct); qualifying
+  sections carry no history rows; finals tournaments record hosts.
+  (VERIFIED-DATA)
+- League sizes (membership counts by `club.dat` league byte):
+  Premier 20, First/Second/Third Division 24 each, Conference 22,
+  Serie A 18, German First Division 18, Spanish First Division 20;
+  cups store 0 (league fields only). Small clubs spill into
+  low-value slots (e.g. 12 Australians under Serie B's 25, Turkish
+  second tier under Serie C2/B's 29) and bucket values
+  (101/254/58). (VERIFIED-DATA)
+
+## Open questions
+
+- League tiebreaker order, per-league slot counts and points value,
+  per-cup bindings, final venues and legs, qualifying group sizes,
+  whether reserves/youth are simulated: needs playtest plus
+  function-level analysis.

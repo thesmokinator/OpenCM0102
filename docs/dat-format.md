@@ -93,7 +93,8 @@ real data and cross-checked against known entities.
   unattached).
 - Date of birth in the staff record: zero-based day of year `u16` at
   byte 16, year `i16` at byte 18. Verified on Thierry Henry
-  (228/1977 = 17 Aug 1977), Patrick Vieira (173/1976 = 23 Jun 1976),
+  (228/1977 = 17 Aug 1977), Patrick Vieira (173/1976 = 22 Jun 1976;
+  the data is one day off his real 23 Jun birthday),
   Dennis Bergkamp (129/1969 = 10 May 1969), David Seaman
   (261/1963 = 19 Sep 1963) and Tony Adams (282/1966 = 10 Oct 1966).
 - Job code at byte 61: 11 = player (99% of playing records), 5 =

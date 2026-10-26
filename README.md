@@ -20,8 +20,9 @@ disc (as an ISO image) into SQLite; originals are never modified.
 ## Documentation
 
 Start at [docs/readme.md](docs/readme.md): user guide, architecture,
-data formats, and per-system behaviour specs (competitions, match
-engine, transfers, tactics, season, players, saves).
+data formats, per-system behaviour specs (competitions, match
+engine, transfers, tactics, season, players, saves), and the
+[implementation roadmap](docs/roadmap.md).
 
 ## Status
 
