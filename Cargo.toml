@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Michele Broggi
+#
+# Workspace manifest for OpenCM0102.
+#
+# OpenCM0102 is an open-source reimplementation of Championship Manager
+# 01/02 in the spirit of OpenRCT2: it never bundles original game files.
+# The user supplies an ISO image of their own CM 01/02 disc once,
+# the data is imported into SQLite, and the engine then runs natively.
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/cm0102-core",
+    "crates/cm0102-db",
+    "crates/cm0102-match",
+    "app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT"
+authors = ["Michele Broggi"]
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }

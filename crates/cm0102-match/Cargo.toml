@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Michele Broggi
+
+[package]
+name = "cm0102-match"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Match simulation engines for OpenCM0102"
+
+[dependencies]
+cm0102-core = { path = "../cm0102-core" }
+rand = "0.9"
+rand_chacha = "0.9"
+rand_distr = "0.5"

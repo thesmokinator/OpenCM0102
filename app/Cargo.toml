@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Michele Broggi
+
+[package]
+name = "opencm0102"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "OpenCM0102 native application"
+
+[[bin]]
+name = "opencm0102"
+path = "src/main.rs"
+
+[dependencies]
+cm0102-core = { path = "../crates/cm0102-core" }
+cm0102-db = { path = "../crates/cm0102-db" }
+eframe = "0.31"
+rfd = "0.16"
+rusqlite = { version = "0.39", features = ["bundled"] }
+serde_json = { workspace = true }
