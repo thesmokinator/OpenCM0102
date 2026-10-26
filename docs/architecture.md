@@ -53,16 +53,25 @@ user ISO → ISO 9660 reader → InstallShield cabinet → .dat parsers
 `app/src/app.rs` owns a small state machine:
 
 ```text
-SetupWizard → DataExplorer ⇄ DatabaseEditor
-                ⇅ NewCareer / LoadCareer
+SetupWizard (Setup Game grid) → NewCareer / LoadCareer → Game
+     ↓ GameSettings / Credits
+     → DataExplorer ⇄ DatabaseEditor
 ```
 
 - The ISO import runs on a background thread; the UI polls progress
   events and stays responsive. The remembered ISO position
   (`session.txt`) reopens the database on later launches.
+- UI strings live in Fluent locale files under `app/i18n/<lang>/`
+  (`app/src/i18n.rs`, `i18n-embed`), embedded in the binary.
+  English is the fallback; the OS locale picks the initial
+  language and Game Settings switches it live. New UI text goes
+  in the `.ftl` files, never inline.
 - The career wizard (`app/career.rs`) mirrors the original flow:
   manager → nationality → club → save → start, persisted through
-  the native saves documented in [saves.md](saves.md).
+  the native saves documented in [saves.md](saves.md). Starting
+  or loading a career opens the main-menu shell (`app/shell.rs`):
+  sidebar sections plus a top bar (manager, club, date,
+  Continue/Holiday/Save), 800×600 like the original.
 - The database editor (`app/editor.rs`) is a generic read-only
   table browser over `game.db`.
 

@@ -3,10 +3,12 @@
 //
 //! OpenCM0102 application entry point.
 //!
-//! Starts the native egui application at 1280x800. All heavy lifting lives
+//! Starts the native egui application at 800x600, the original game's
+//! resolution (the window stays resizable). All heavy lifting lives
 //! in the `cm0102-*` crates; this binary only owns windows and widgets.
 
 mod app;
+mod i18n;
 
 use app::OpenCmApp;
 
@@ -23,9 +25,9 @@ fn main() -> eframe::Result<()> {
     )
 }
 
-/// The main window viewport: 1280x800 as per the classic layout brief.
+/// The main window viewport: 800x600 like the original game, resizable.
 fn egui_viewport() -> eframe::egui::ViewportBuilder {
     eframe::egui::ViewportBuilder::default()
-        .with_inner_size([1280.0, 800.0])
+        .with_inner_size([800.0, 600.0])
         .with_title("OpenCM0102")
 }

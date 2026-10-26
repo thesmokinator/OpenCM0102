@@ -16,6 +16,8 @@
 
 mod career;
 mod editor;
+mod setup;
+mod shell;
 
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -41,6 +43,28 @@ enum Screen {
     NewCareer,
     /// Load a previously saved native career.
     LoadCareer,
+    /// Main-menu shell: sidebar sections for the active career.
+    Game,
+    /// Game settings (knobs unlock with their engines).
+    GameSettings,
+    /// Project credits and links.
+    Credits,
+}
+
+impl Screen {
+    /// Banner subtitle naming the current screen.
+    fn subtitle(self) -> String {
+        crate::i18n::t(match self {
+            Screen::SetupWizard => "screen-setup-game",
+            Screen::DataExplorer => "screen-data-explorer",
+            Screen::DatabaseEditor => "screen-database-editor",
+            Screen::NewCareer => "screen-new-career",
+            Screen::LoadCareer => "screen-load-career",
+            Screen::Game => "screen-main-menu",
+            Screen::GameSettings => "screen-game-settings",
+            Screen::Credits => "screen-credits",
+        })
+    }
 }
 
 /// Events sent by the background import thread.
@@ -97,6 +121,7 @@ pub struct OpenCmApp {
     db_path: Option<PathBuf>,
     editor: EditorState,
     career: career::CareerState,
+    shell: shell::ShellState,
 }
 
 impl OpenCmApp {
@@ -126,6 +151,7 @@ impl OpenCmApp {
             db_path: None,
             editor: EditorState::default(),
             career: career::CareerState::default(),
+            shell: shell::ShellState::default(),
         };
         app.restore_session();
         app
@@ -311,39 +337,60 @@ impl OpenCmApp {
     }
 
     /// Setup-wizard screen: pick the ISO image of the original disc.
-    fn show_setup_wizard(&mut self, ui: &mut egui::Ui, importing: bool) {
-        ui.heading("OpenCM0102 — Setup");
-        ui.label(
-            "Select the ISO image of your own CM 01/02 disc. \
-             Nothing from the original game is bundled with this program, \
-             and the image is only read, never modified. \
-             If you own the physical CD, create an ISO image of it first \
-             with your operating system's disc tools.",
-        );
-        ui.add_space(12.0);
-
-        if importing {
-            ui.horizontal(|ui| {
-                ui.add(egui::Spinner::new());
-                ui.label(&self.import_stage);
-            });
-        } else if ui.button("Select ISO image…").clicked() {
-            if let Some(file) = rfd::FileDialog::new()
-                .add_filter("ISO image", &["iso"])
-                .pick_file()
-            {
-                self.start_import(file);
-            }
+    /// Fixed application sidebar: version, navigation, restart/exit.
+    /// Visible on every screen, like the original game's menu bar.
+    fn show_app_sidebar(&mut self, ui: &mut egui::Ui) {
+        use crate::i18n::{t, tr};
+        ui.small(tr(
+            "sidebar-version",
+            &[("version", env!("CARGO_PKG_VERSION"))],
+        ));
+        ui.separator();
+        if ui.button(t("sidebar-setup-game")).clicked() {
+            self.screen = Screen::SetupWizard;
         }
-
-        ui.add_space(12.0);
-        ui.label(&self.status);
-        if let Some(error) = &self.error {
-            ui.colored_label(egui::Color32::LIGHT_RED, error);
-            if read_session().is_some() && ui.button("Disconnect").clicked() {
-                self.disconnect();
-            }
+        if ui
+            .add_enabled(
+                self.state.managed_club_id.is_some(),
+                egui::Button::new(t("sidebar-main-menu")),
+            )
+            .clicked()
+        {
+            self.screen = Screen::Game;
         }
+        if ui
+            .add_enabled(
+                self.provider.is_some(),
+                egui::Button::new(t("sidebar-data-explorer")),
+            )
+            .clicked()
+        {
+            self.screen = Screen::DataExplorer;
+        }
+        if ui
+            .add_enabled(
+                self.provider.is_some(),
+                egui::Button::new(t("sidebar-database-editor")),
+            )
+            .clicked()
+        {
+            self.screen = Screen::DatabaseEditor;
+            self.editor.loaded = false;
+        }
+        if read_session().is_some() && ui.button(t("sidebar-disconnect")).clicked() {
+            self.disconnect();
+        }
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+            if ui.button(t("sidebar-exit-game")).clicked() {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            if ui.button(t("sidebar-restart-game")).clicked() {
+                self.screen = Screen::SetupWizard;
+                self.error = None;
+                self.status = t("sidebar-back-to-setup");
+            }
+        });
     }
 
     /// Data-explorer screen: clubs on the left, squad on the right.
@@ -516,53 +563,20 @@ impl OpenCmApp {
 }
 
 impl eframe::App for OpenCmApp {
-    /// Draw the menu bar and the current screen, polling the import job.
+    /// Draw the fixed sidebar, banner, action bar and current screen,
+    /// polling the import job. Layout mirrors the original game:
+    /// navigation on the left, the game on the right.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let importing = self.poll_import(ctx);
 
-        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
-                ui.menu_button("Settings", |ui| {
-                    if ui
-                        .add_enabled(
-                            self.provider.is_some(),
-                            egui::Button::new("Database editor"),
-                        )
-                        .clicked()
-                    {
-                        self.screen = Screen::DatabaseEditor;
-                        self.editor.loaded = false;
-                        ui.close_menu();
-                    }
-                    if ui
-                        .add_enabled(self.provider.is_some(), egui::Button::new("Data explorer"))
-                        .clicked()
-                    {
-                        self.screen = Screen::DataExplorer;
-                        ui.close_menu();
-                    }
-                    if ui
-                        .add_enabled(self.provider.is_some(), egui::Button::new("New career"))
-                        .clicked()
-                    {
-                        self.start_new_career();
-                        ui.close_menu();
-                    }
-                    if ui
-                        .add_enabled(self.provider.is_some(), egui::Button::new("Load career"))
-                        .clicked()
-                    {
-                        self.show_load_career_entry();
-                        ui.close_menu();
-                    }
-                    if ui
-                        .add_enabled(read_session().is_some(), egui::Button::new("Disconnect"))
-                        .clicked()
-                    {
-                        self.disconnect();
-                        ui.close_menu();
-                    }
-                });
+        egui::SidePanel::left("sidebar")
+            .exact_width(150.0)
+            .show(ctx, |ui| self.show_app_sidebar(ui));
+        egui::TopBottomPanel::top("banner").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading("OpenCM0102");
+                ui.separator();
+                ui.label(self.screen.subtitle());
                 if importing {
                     ui.separator();
                     ui.add(egui::Spinner::new());
@@ -570,13 +584,35 @@ impl eframe::App for OpenCmApp {
                 }
             });
         });
+        if self.screen == Screen::Game {
+            egui::TopBottomPanel::bottom("action_bar").show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(&self.status);
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            if ui.button(crate::i18n::t("shell-continue")).clicked() {
+                                self.state.advance_day();
+                                self.status = crate::i18n::tr(
+                                    "shell-advanced-to",
+                                    &[("date", &self.state.current_date.to_string())],
+                                );
+                            }
+                        },
+                    );
+                });
+            });
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| match self.screen {
-            Screen::SetupWizard => self.show_setup_wizard(ui, importing),
+            Screen::SetupWizard => self.show_setup_game(ui, importing),
             Screen::DataExplorer => self.show_data_explorer(ui),
             Screen::DatabaseEditor => self.show_database_editor(ui),
             Screen::NewCareer => self.show_new_career(ui),
             Screen::LoadCareer => self.show_load_career(ui),
+            Screen::Game => self.show_game(ui),
+            Screen::GameSettings => self.show_game_settings(ui),
+            Screen::Credits => self.show_credits(ui),
         });
     }
 }

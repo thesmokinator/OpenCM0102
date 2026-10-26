@@ -18,6 +18,11 @@ path = "src/main.rs"
 cm0102-core = { path = "../crates/cm0102-core" }
 cm0102-db = { path = "../crates/cm0102-db" }
 eframe = "0.31"
+fluent = "0.17"
+i18n-embed = { version = "0.16", features = ["fluent-system"] }
 rfd = "0.16"
 rusqlite = { version = "0.39", features = ["bundled"] }
+rust-embed = "8"
 serde_json = { workspace = true }
+sys-locale = "0.3"
+unic-langid = "0.9"

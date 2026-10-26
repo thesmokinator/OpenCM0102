@@ -28,8 +28,9 @@ engine, transfers, tactics, season, players, saves), target
 ## Status
 
 ISO import, data explorer, database viewer, new-career flow with
-native saves. Game-system rules are being specified in `docs/` before
-implementation; the match engine is a declared placeholder.
+native saves, main-menu shell. Game-system rules are being specified
+in `docs/` before implementation; the match engine is a declared
+placeholder.
 
 ## Build
 

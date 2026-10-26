@@ -13,13 +13,24 @@ How to install, import your data and play OpenCM0102.
 - The ISO is only ever read, never modified, and no original game
   file is distributed with or bundled into this program.
 
+## Layout
+
+Like the original game, the window keeps a fixed sidebar on the
+left (version, navigation, restart/exit), a banner naming the
+current screen on top, the game on the right, and a contextual
+action bar at the bottom. The default window is 800×600 and stays
+resizable.
+
 ## First launch: importing your data
 
-1. Start OpenCM0102. The setup wizard asks for the ISO image.
+1. Start OpenCM0102. The Setup Game screen asks for the ISO image.
 2. Pick the `.iso` file. The import runs in the background (reading
    the disc, extracting the game data, building the database) while
    the window stays responsive.
-3. When the import finishes, the data explorer opens.
+3. When the import finishes, the Setup Game grid unlocks: Start New
+   Game, Restore Saved Game, Delete Saved Game, Game Settings and
+   Game Credits (with project links). One start mode only — there
+   is no quick start, network play or hall of fame.
 
 Your imported data lives in the user data directory:
 
@@ -62,14 +73,37 @@ flow:
 4. **Save and start** — review the choices, name the save, start.
 
 The career is saved as `saves/<name>.json` and begins on the first
-day of the season. The explorer header shows the manager's name,
-and the managed club's squad is selected automatically.
+day of the season. Starting or loading a career opens the main
+menu.
+
+## Main menu
+
+The main menu mirrors the original game's main screen: a sidebar
+with one section per area of the game, a top bar showing the
+manager, the club and the date, with **Holiday** (interim: a fixed
+7-day jump) and **Save game** (re-saves the active file), and a
+bottom action bar with **Continue** (next day).
+
+Sections: Squad, Tactics, Training, Fixtures, League Table,
+Transfers, Finances & Info, Board, Staff, Search, News, History,
+Records, Awards, Club Info. Squad shows the managed club's real
+squad; every other section is an honest placeholder citing the
+spec in `docs/` that will back it, implemented phase by phase
+(see [roadmap.md](roadmap.md)).
+
+## Language
+
+The interface language is negotiated from your operating system on
+first launch (English fallback) and can be switched live in Game
+Settings. Only English ships today; each new locale is one
+`app/i18n/<lang>/` directory.
 
 ## Load career
 
-`Load career` in the Settings menu lists every saved career with
-manager, club and in-game date. `Refresh` rescans the directory.
-Loading a save resumes it exactly where it was left.
+`Restore Saved Game` lists every saved career with manager, club
+and in-game date. `Refresh` rescans the directory. Each row also
+offers `Delete` with two-click confirmation. Loading a save
+resumes it exactly where it was left.
 
 Saves are versioned: if a save was written by a newer release than
 the one you run, loading is refused with an explicit error instead

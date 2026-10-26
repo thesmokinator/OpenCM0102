@@ -70,6 +70,11 @@ pub struct CareerState {
     saves: Vec<SavedCareerEntry>,
     saves_loaded: bool,
     error: Option<String>,
+    /// File the active career was started from or loaded from, so the
+    /// main-menu shell can re-save without asking again.
+    pub active_save_file: Option<String>,
+    /// Save file with delete confirmation armed (two-click delete).
+    delete_armed: Option<String>,
 }
 
 impl OpenCmApp {
@@ -302,8 +307,8 @@ impl OpenCmApp {
         ui.horizontal(|ui| {
             ui.heading("Load career");
             ui.separator();
-            if ui.button("Back to explorer").clicked() {
-                self.screen = Screen::DataExplorer;
+            if ui.button("Back to setup").clicked() {
+                self.screen = Screen::SetupWizard;
             }
             if ui.button("Refresh").clicked() {
                 self.career.saves_loaded = false;
@@ -328,6 +333,7 @@ impl OpenCmApp {
                 ui.strong("Club");
                 ui.strong("Date");
                 ui.strong("");
+                ui.strong("");
                 ui.end_row();
                 for entry in self.career.saves.clone() {
                     ui.label(&entry.file_name);
@@ -336,6 +342,14 @@ impl OpenCmApp {
                     ui.label(entry.date.to_string());
                     if ui.button("Load").clicked() {
                         self.load_career_file(&entry.file_name);
+                    }
+                    let armed = self.career.delete_armed.as_deref() == Some(&entry.file_name);
+                    if ui.button(if armed { "Sure?" } else { "Delete" }).clicked() {
+                        if armed {
+                            self.delete_career_file(&entry.file_name);
+                        } else {
+                            self.career.delete_armed = Some(entry.file_name.clone());
+                        }
                     }
                     ui.end_row();
                 }
@@ -425,12 +439,37 @@ impl OpenCmApp {
         self.selected_club_id = Some(club_id);
         self.refresh_squad();
         self.selected_player = None;
-        self.screen = Screen::DataExplorer;
+        self.screen = Screen::Game;
+        self.career.active_save_file = Some(file_name.clone());
         self.status = format!(
             "Career started: {} manages {}. Saved as {file_name}.",
             manager.full_name(),
             self.selected_career_club_name()
         );
+    }
+
+    /// Delete a save file after two-click confirmation.
+    fn delete_career_file(&mut self, file_name: &str) {
+        self.career.delete_armed = None;
+        if !is_plain_file_name(file_name) {
+            self.career.error = Some("Refusing to delete an unsafe file name.".to_string());
+            return;
+        }
+        let path = match saves_dir() {
+            Ok(dir) => dir.join(file_name),
+            Err(error) => {
+                self.career.error = Some(error);
+                return;
+            }
+        };
+        if let Err(error) = std::fs::remove_file(&path) {
+            self.career.error = Some(format!("cannot delete save: {error}"));
+            return;
+        }
+        if self.career.active_save_file.as_deref() == Some(file_name) {
+            self.career.active_save_file = None;
+        }
+        self.career.saves_loaded = false;
     }
 
     /// Rescan the saves directory for loadable native careers.
@@ -502,7 +541,8 @@ impl OpenCmApp {
                 self.selected_club_id = self.state.managed_club_id;
                 self.refresh_squad();
                 self.selected_player = None;
-                self.screen = Screen::DataExplorer;
+                self.screen = Screen::Game;
+                self.career.active_save_file = Some(file_name.to_string());
                 let manager = self
                     .state
                     .manager
@@ -533,11 +573,21 @@ impl OpenCmApp {
 }
 
 /// Directory holding native career saves inside the user data directory.
-fn saves_dir() -> Result<PathBuf, String> {
+pub(super) fn saves_dir() -> Result<PathBuf, String> {
     Ok(data_dir()?.join("saves"))
 }
 
 /// File-system-safe stem for a user-supplied save name.
+/// True when `name` is a bare file name with no parent or separator,
+/// so joining it under the saves directory cannot escape it.
+fn is_plain_file_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains(['/', '\\'])
+        && name != "."
+        && name != ".."
+        && !name.contains("..")
+}
+
 fn sanitize_save_name(name: &str) -> String {
     let mut cleaned: String = name
         .trim()
@@ -559,7 +609,7 @@ fn sanitize_save_name(name: &str) -> String {
 }
 
 /// Write a native career save to `path`, creating parent directories.
-fn save_career_to(path: &Path, saved: &SavedCareer) -> Result<(), String> {
+pub(super) fn save_career_to(path: &Path, saved: &SavedCareer) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create saves directory: {error}"))?;
@@ -600,6 +650,15 @@ mod tests {
         assert_eq!(sanitize_save_name("../evil.sav"), "evil_sav");
         assert_eq!(sanitize_save_name("  "), "career");
         assert_eq!(sanitize_save_name("a/b\\c:d"), "a_b_c_d");
+    }
+
+    #[test]
+    fn plain_file_name_rejects_escapes() {
+        assert!(is_plain_file_name("Sacchi - Arsenal.json"));
+        assert!(!is_plain_file_name(""));
+        assert!(!is_plain_file_name("../evil.json"));
+        assert!(!is_plain_file_name("sub/dir.json"));
+        assert!(!is_plain_file_name(".."));
     }
 
     /// A career written to disk reads back with manager and club intact.
