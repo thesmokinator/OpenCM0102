@@ -52,6 +52,11 @@ validation step (`save_game_version` id check).
 
 ## Consequences
 
+- Input is the 3.9.60 ISO as-is: the user never installs a patch.
+  All patch knowledge serves the reimplementation only — fixed
+  behaviours are baked into the engine and rules, and documented
+  data-bug corrections (e.g. Finland) apply at import as editable
+  rules. No patch bytes ship with us or are needed at runtime.
 - Specs in `docs/` describe 3.9.68 behaviour wherever the difference
   is known; anything still verified only on 3.9.60 is marked so until
   the patched game confirms it.

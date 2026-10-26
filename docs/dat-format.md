@@ -182,6 +182,8 @@ e.g. staff sections sum to the byte). Counts 3.9.60 → 3.9.68:
 | `common_names.dat` | 8,493 | 13,256 |
 | `club_comp.dat` | 390 | 433 |
 | `staff_comp.dat` | 542 | 543 |
+| `*.lng` (×10) | 1,621,488 B | 1,993,486 B |
+| `language.ldb` | 34,562,266 B | 204,672,142 B |
 | `club_comp_history.dat` rows | 7,194 | 10,766 |
 | `nation_comp_history.dat` rows | 143 | 273 |
 | `staff_history.dat` rows | 270,654 | 385,846 |
@@ -202,5 +204,11 @@ Structural notes:
   move to the front) with the same 19 entries.
 - Not shipped by the patch (3.9.60 bytes stay current):
   `events_*.cfg`, `euro.cfg`, `fancluburls.txt`, `pundit.cfg`,
-  `si.rgn`, `Cpuinf32.dll`, `game.mbr`/`match.mbr` templates,
-  `language.ldb`.
+  `si.rgn`, `Cpuinf32.dll`, `game.mbr`/`match.mbr` templates
+  (verified byte-identical in the patched install).
+- `language.ldb` grows ~6× (34.5 → 204.6 MB): it is the
+  multilingual text bank (~9,807 templates × 10 languages);
+  record layout still open.
+- Default tactics ship as `Data/*.pct` (one file per formation
+  variant, e.g. `442_default.pct`); format still open — see
+  [tactics.md](tactics.md).

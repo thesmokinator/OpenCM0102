@@ -36,8 +36,20 @@ Vans Trophy (354) and three regional premier divisions (358–360).
 
 Solved for league fields: `club.dat` byte 87 is the current-season
 league id and byte 91 the previous-season one (see
-[dat-format.md](dat-format.md) for the verified layout). The
-lower-league bucket encoding used by small clubs is still open.
+[dat-format.md](dat-format.md) for the verified layout).
+Competition ids below 364 are stable across data versions (only
+slot 213 is renamed and 364–389 repurposed), so byte-87 values
+are comparable; same-name club moves between versions are real
+promotion/relegation updates (e.g. Köln 16→17 for 02/03).
+
+Small clubs that play in no simulated league share bucket slots
+instead of league ids (VERIFIED-DATA distribution on 10,580
+clubs): slot 101 holds 2,351 worldwide minnows, 254 holds 2,071,
+58 holds 993, with smaller buckets (97/98/57/90/…). Buckets
+persist and grow in 3.9.68. Some minnows also spill under real
+league ids (12 Australians under Serie B's 25, Turkish sides
+under Serie C2/B's 29). The rule assigning a club to a bucket or
+a spill slot is still open.
 
 ## Coverage
 

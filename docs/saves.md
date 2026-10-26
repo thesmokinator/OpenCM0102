@@ -37,36 +37,38 @@ are that version. Ground rules:
   bit-identical future results: simulation algorithms are a faithful
   reimplementation, not the original binaries.
 
-## Original format sketch (STRING-EVIDENCE)
+## Original format (VERIFIED-DATA, 3.9.60 sample)
 
-Recovered from the original's shipped UI and error text — field
-order and meaning still need byte-level confirmation against real
-saves:
+Container verified byte-exact on a user-supplied 3.9.60 save (109
+payloads unpacked, 57 cross-checked against the game's own unpacked
+temp files):
 
-- Container files use the `.mbr` extension (`game.mbr` for the
-  career, `match.mbr` for match data). Layout, verified on a
-  community save (patched exe, modern DB — offsets may differ on
-  3.9.60): a short header opening with the version id, then a file
-  table naming each embedded `.dat` with offset and size, then the
-  payloads.
-- The career header is versioned (`save_game_version` id) and
-  holds, in order: save summary, unique game id, database size,
-  date and time of day (plus last date/time), number of selected
-  leagues and foreground leagues, default nation id, staff runtime
-  data (with counter), club runtime data, and a club reputation
-  table.
-- Past the header, the save is a set of 33 per-system temp files:
-  general, player, nonplayer, transfer, contract,
-  squad_manager, scout_manager, finance, discipline,
-  dispute, fine, awol, injury, training, tactics, match_stats,
-  simulated_stats, stats, history, records, awards, fifa_rankings,
-  media, news, notes, human_manager, man_conf, national_teams,
-  fog, index, off, references, retire (all `*.dat`), each with
-  its own load/save error reporting.
-- Saving packs temporary files and moves the result into place
-  atomically; temporary and replaced files are removed afterwards.
-  Loading and saving run per-field progress reporting.
+- The `.sav` opens with a file table: 268-byte entries holding
+  five `u32` values (offset and expanded size come last) plus a
+  248-byte NUL-padded file name. Payloads follow contiguously.
+- Payloads are compressed with a byte RLE: `0x80` is a literal
+  `0x80` byte, bytes above `0x80` repeat the next byte
+  (`b & 0x7F`) times, bytes below are literal. Table sizes are the
+  expanded sizes.
+- Payloads are the full database (localized at new-game creation:
+  names are rewritten in the active language, e.g. `dell'Africa`),
+  the ten `.lng` files, per-system runtime files (`general`,
+  `player`, `nonplayer`, `transfer`, `contract`, `finance`,
+  `discipline`, `injury`, `tactics`, `news`, `media`, `notes`,
+  `human_manager`, `man_conf`, `national_teams`, `fog`, `index`,
+  `off`, `retire`, …), one state file per active competition
+  (`<name>_<id>.tmp`, e.g. `Serie A Italiana_24.tmp`), plus
+  `fixtures_<year>.tmp`, stats, history and seeding files.
+- During play the game works on these files unpacked in its own
+  directory; saving packs them and moves the result into place
+  atomically. Loading and saving run per-field progress reporting.
 
-Blocked on: a set of user-supplied saves with known in-game state
-(ideally a fresh career plus the same career a few days later, with
-club, date and league position noted) for byte-level confirmation.
+Still open: per-payload record layouts (competition state,
+fixtures, runtime files), most career header fields
+(`save_game_version` id, game id, dates, league counts — known
+from shipped UI text, order unconfirmed), and a 3.9.68 sample to
+confirm the target version byte-identically. Known `general.dat`
+anchors in the sample: default nation at offset 4, save version
+at 2004, manager name at 2024, club name at 2084. A fresh career
+plus the same career a few days later (club, date, league
+position noted) would pin the runtime layouts down.

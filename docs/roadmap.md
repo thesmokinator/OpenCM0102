@@ -61,12 +61,14 @@ analysis, or both — details in the per-system specs):
 6. Display-vs-storage attribute mapping.
 7. Wage/contract/expiry storage offsets.
 8. Regen/intake dates and generation rules.
-9. Byte-level save confirmation (needs user-supplied saves).
+9. Save payload record layouts + 3.9.68 sample (container and
+    compression solved on a 3.9.60 save).
 10. New-game screen order and rollover UX.
 11. Exe-side 3.9.68 fixes (free-kick chance, MoM logic, interest
     severity, selection interplay, West Ham mechanism, ARSE):
     needs playtest observation on the patched game.
-12. Lower-league bucket/spill encoding for small clubs.
+12. Bucket/spill assignment rule (distribution characterized;
+    generative rule open).
 
 ## Build order
 

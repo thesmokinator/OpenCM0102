@@ -53,6 +53,11 @@ playtest or function-level analysis).
 - Formations ship as named presets with a 12-field file format;
   arrows are per-player runs in with-ball / without-ball views.
   (STRING-EVIDENCE)
+- Preset files (`Data/*.pct`) are 1,476 bytes with an author field
+  (e.g. `Marc Vaughan`) and per-player instruction bytes: two
+  presets differ in ~250 mostly single bytes spread over the
+  player section, team settings shared. Field semantics still
+  open. (VERIFIED-DATA)
 - Lineups: exactly 11 outfield players, competition squad caps,
   substitutes from the match squad, takers must be in the eleven
   and stay on the pitch, automatic captain fallback, and a
