@@ -59,6 +59,10 @@ pub struct MatchContext {
     pub date: GameDate,
     /// Deterministic seed for this fixture.
     pub seed: u64,
+    /// Average current ability of the home starting eleven.
+    pub home_avg_ca: f32,
+    /// Average current ability of the away starting eleven.
+    pub away_avg_ca: f32,
 }
 
 /// Outcome of one simulated fixture.

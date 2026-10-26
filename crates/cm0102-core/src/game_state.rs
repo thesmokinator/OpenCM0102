@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::calendar::GameDate;
 use crate::data::Manager;
+use crate::schedule::Schedule;
+use crate::tactics::TeamTactics;
 
 /// The whole simulated world at a point in time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,6 +19,16 @@ pub struct GameState {
     pub managed_club_id: Option<u32>,
     /// Human player's manager, once a career has started.
     pub manager: Option<Manager>,
+    /// This season's fixture list. Defaults to empty so careers saved
+    /// before calendars existed still load; the next Continue
+    /// regenerates the calendar through the season rollover.
+    #[serde(default)]
+    pub schedule: Schedule,
+    /// Managed club's tactics: lineup plus instructions. Defaults to
+    /// an empty 4-4-2 so older saves still load; the UI auto-picks a
+    /// lineup from the squad when none is stored.
+    #[serde(default)]
+    pub tactics: TeamTactics,
 }
 
 impl GameState {
@@ -26,6 +38,8 @@ impl GameState {
             current_date: GameDate::SEASON_START,
             managed_club_id: None,
             manager: None,
+            schedule: Schedule::default(),
+            tactics: TeamTactics::default(),
         }
     }
 
@@ -136,5 +150,15 @@ mod tests {
             restored.state.manager.expect("manager").full_name(),
             "Arrigo Sacchi"
         );
+    }
+
+    /// Saves written before calendars existed load with an empty
+    /// schedule, which the season rollover regenerates.
+    #[test]
+    fn old_saves_load_without_schedule() {
+        let json = r#"{"version":1,"state":{"current_date":{"year":2001,"month":7,"day":1},"managed_club_id":676,"manager":{"first_name":"Arrigo","second_name":"Sacchi","nation_id":1}}}"#;
+        let restored: SavedCareer = serde_json::from_str(json).expect("deserializable");
+        assert!(restored.state.schedule.fixtures.is_empty());
+        assert_eq!(restored.state.managed_club_id, Some(676));
     }
 }

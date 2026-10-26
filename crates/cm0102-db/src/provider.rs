@@ -119,12 +119,17 @@ impl DataProvider for SqliteDataProvider {
     fn get_club(&self, id: u32) -> Result<Club> {
         let connection = self.connection.lock().expect("provider lock poisoned");
         connection
-            .query_row("SELECT id, name FROM clubs WHERE id = ?1", [id], |row| {
-                Ok(Club {
-                    id: row.get::<_, i64>(0)? as u32,
-                    name: row.get(1)?,
-                })
-            })
+            .query_row(
+                "SELECT id, name, league_id FROM clubs WHERE id = ?1",
+                [id],
+                |row| {
+                    Ok(Club {
+                        id: row.get::<_, i64>(0)? as u32,
+                        name: row.get(1)?,
+                        league_id: row.get::<_, Option<i64>>(2)?.map(|id| id as u32),
+                    })
+                },
+            )
             .map_err(|error| match error {
                 rusqlite::Error::QueryReturnedNoRows => CoreError::NotFound(format!("club {id}")),
                 other => to_core(other),
@@ -134,13 +139,14 @@ impl DataProvider for SqliteDataProvider {
     fn list_clubs(&self) -> Result<Vec<Club>> {
         let connection = self.connection.lock().expect("provider lock poisoned");
         let mut statement = connection
-            .prepare("SELECT id, name FROM clubs ORDER BY name")
+            .prepare("SELECT id, name, league_id FROM clubs ORDER BY name")
             .map_err(to_core)?;
         let rows = statement
             .query_map([], |row| {
                 Ok(Club {
                     id: row.get::<_, i64>(0)? as u32,
                     name: row.get(1)?,
+                    league_id: row.get::<_, Option<i64>>(2)?.map(|id| id as u32),
                 })
             })
             .map_err(to_core)?;
@@ -183,7 +189,10 @@ mod tests {
         let connection = Connection::open_in_memory().unwrap();
         crate::importer::create_schema(&connection).unwrap();
         connection
-            .execute("INSERT INTO clubs (id, name) VALUES (1, 'Arsenal')", [])
+            .execute(
+                "INSERT INTO clubs (id, name, league_id) VALUES (1, 'Arsenal', 7)",
+                [],
+            )
             .unwrap();
         connection
             .execute(
@@ -223,7 +232,27 @@ mod tests {
         let clubs = provider.list_clubs().unwrap();
         assert_eq!(clubs.len(), 1);
         assert_eq!(clubs[0].name, "Arsenal");
+        assert_eq!(clubs[0].league_id, Some(7));
         assert_eq!(provider.get_club(1).unwrap().name, "Arsenal");
+    }
+
+    /// Databases created before league membership existed gain the
+    /// column on open, with NULL (unknown) leagues.
+    #[test]
+    fn old_databases_migrate_clubs() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute(
+                "CREATE TABLE clubs (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute("INSERT INTO clubs (id, name) VALUES (1, 'Arsenal')", [])
+            .unwrap();
+        crate::importer::create_schema(&connection).unwrap();
+        let provider = SqliteDataProvider::new(connection);
+        assert_eq!(provider.get_club(1).unwrap().league_id, None);
     }
 
     /// Nations list alphabetically.

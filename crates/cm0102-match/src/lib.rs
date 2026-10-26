@@ -12,16 +12,23 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, Poisson};
 
-/// Placeholder engine: goals follow a Poisson distribution around fixed
-/// home/away expectations. Deterministic for a given seed.
+/// Placeholder engine: goals follow a Poisson distribution around
+/// home/away expectations scaled by the relative strength of the two
+/// starting elevens (average current ability). Deterministic for a
+/// given seed. The scaling is invented placeholder behaviour — the
+/// real attribute weights are still open (see
+/// `docs/match-engine-spec.md`).
 #[derive(Debug, Default)]
 pub struct SimpleMatchEngine;
 
 impl MatchEngine for SimpleMatchEngine {
     fn simulate(&self, ctx: &MatchContext) -> MatchResult {
         let mut rng = ChaCha8Rng::seed_from_u64(ctx.seed);
-        let home_goals = sample_goals(&mut rng, 1.45);
-        let away_goals = sample_goals(&mut rng, 1.10);
+        let home_ca = ctx.home_avg_ca.max(1.0);
+        let away_ca = ctx.away_avg_ca.max(1.0);
+        let ratio = (home_ca / away_ca).clamp(0.5, 2.0);
+        let home_goals = sample_goals(&mut rng, f64::from(ratio) * 1.45);
+        let away_goals = sample_goals(&mut rng, 1.10 / f64::from(ratio));
         let mut events = Vec::new();
         for goal in 0..home_goals {
             events.push(format!("{}' Home club scores!", 10 + goal * 17));
@@ -56,6 +63,8 @@ mod tests {
             away_club_id: 2,
             date: GameDate::SEASON_START,
             seed,
+            home_avg_ca: 150.0,
+            away_avg_ca: 150.0,
         }
     }
 
@@ -92,5 +101,21 @@ mod tests {
             (1.5..=4.5).contains(&average),
             "average goals per match: {average}"
         );
+    }
+
+    /// A stronger eleven outscores a weaker one on average.
+    #[test]
+    fn stronger_eleven_scores_more() {
+        let engine = SimpleMatchEngine;
+        let (mut strong, mut weak) = (0u32, 0u32);
+        for seed in 0..500 {
+            let mut ctx = context(seed);
+            ctx.home_avg_ca = 180.0;
+            ctx.away_avg_ca = 120.0;
+            let result = engine.simulate(&ctx);
+            strong += result.home_goals;
+            weak += result.away_goals;
+        }
+        assert!(strong > weak, "{strong} vs {weak}");
     }
 }

@@ -67,6 +67,16 @@ impl GameDate {
         }
     }
 
+    /// The date `days` later, rolling over month and year boundaries.
+    /// Round spacing is small (weekly), so a plain loop is enough.
+    pub fn add_days(self, days: u32) -> Self {
+        let mut date = self;
+        for _ in 0..days {
+            date = date.next_day();
+        }
+        date
+    }
+
     /// The following day, rolling over month and year boundaries.
     pub fn next_day(self) -> Self {
         if self.day < Self::days_in_month(self.year, self.month) {
@@ -112,6 +122,23 @@ mod tests {
         assert_eq!(
             GameDate::new(2001, 12, 31).next_day(),
             GameDate::new(2002, 1, 1)
+        );
+    }
+
+    /// `add_days` crosses month and year boundaries.
+    #[test]
+    fn add_days_crosses_boundaries() {
+        assert_eq!(
+            GameDate::new(2001, 7, 28).add_days(7),
+            GameDate::new(2001, 8, 4)
+        );
+        assert_eq!(
+            GameDate::new(2001, 12, 30).add_days(3),
+            GameDate::new(2002, 1, 2)
+        );
+        assert_eq!(
+            GameDate::new(2001, 7, 1).add_days(0),
+            GameDate::new(2001, 7, 1)
         );
     }
 

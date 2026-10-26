@@ -14,6 +14,13 @@ pub struct Club {
     pub id: u32,
     /// Display name, e.g. `Arsenal`.
     pub name: String,
+    /// Current-season league slot: `club.dat` byte 87, equal to the
+    /// `club_comp.dat` id for real leagues. `None` when the imported
+    /// database predates league membership (re-import to populate).
+    /// Bucket values (see `schedule::NON_LEAGUE_SLOTS`) mean the club
+    /// plays in no simulated league.
+    #[serde(default)]
+    pub league_id: Option<u32>,
 }
 
 /// A nation known to the engine (manager nationality, club origin).
