@@ -67,8 +67,26 @@ temp files):
 - During play the game works on these files unpacked in its own
   directory; saving packs them and moves the result into place
   atomically. Loading and saving run per-field progress reporting.
+- A modern patched-database save (community sample, not the
+  3.9.60 baseline) holds 317 table entries under the same
+  268-byte entry format; its first entry carries the values
+  3 / 22 / 317, the last matching the entry count. Its runtime
+  sections add per-year fixture and transfer files and a
+  69,000,000-byte match-stats ring (3,450 bytes times 20,000
+  slots), plus UEFA/CONMEBOL seeding state files. Some of its
+  payloads are stored raw instead of RLE-packed (tiny sections
+  such as notes and fog still decode exactly; larger runtime
+  sections do not), so the per-entry compression flag still
+  needs locating before those payloads can be carved reliably.
 
-Still open: per-payload record layouts (competition state,
+Known payload layouts so far: the finance file is a flat
+array of 359-byte club records (load/save pair verified);
+manager confidence is variable-length per manager (main block
+plus dated sub-records); discipline entries are 29-byte
+records (20/8/10-byte blocks with 16-bit counts) and injury
+entries are 31-byte records (48/22/17-byte injury records
+with 32-bit counts), both with load/save pairs verified.
+Still open: other per-payload record layouts (competition state,
 fixtures, most runtime files), most career header fields
 (`save_game_version` id, game id, dates, league counts — known
 from shipped UI text, order unconfirmed), and a 3.9.68 sample to

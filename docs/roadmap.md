@@ -39,7 +39,13 @@ persistence. Each gameplay spec doc lists its file's knobs.
 Closed through analysis (see spec docs for details):
 
 - Per-league slot counts and sizes, including cup-exclusion proof.
-- Cup draw algorithm: full shuffle, random home/away, bye carry.
+- Cup draw algorithm: three per-round modes (plain shuffle,
+  seeding-ordered, seeding-ordered with same-nation avoidance);
+  seeded modes sort by seeding value highest-first, then deal
+  from a random start with wraparound and a home/away coin flip;
+  bye carry. Seeding itself is a club-strength ranking (value
+  term plus sixteen times a strength field plus weighted
+  best-fifteen ratings), shared by league and cup ranking.
 - Referee strictness mapping (Lenient/Strict/Harsh bands).
 - Save container solved: 268-byte file table, byte-RLE payloads,
   109-file inventory incl. per-competition state, atomic temp-pack
@@ -50,6 +56,19 @@ Closed through analysis (see spec docs for details):
 - Patch container fully mapped; both 3.9.68 executables recovered
   and string-diffed (Korean/Japanese content, new languages, save
   version validation, playoff news rework).
+- Work permits solved: nation-flag plus EU/second-nationality
+  predicate, 14-byte permit records, periodic grant within five
+  days, renewal/removal semantics.
+- Board/FA confidence bands solved: main-block value on a
+  0–10,000 scale with six verified message bands; the persisted
+  confidence file layout (main block plus dated sub-records) is
+  mapped. Result-driven deltas remain open.
+- Regen generation solved: retired-list consumption, count-minus-
+  two generation, 1–1500/1–500 unattached draws, attached
+  inheritance with one-half and three-quarters strength gates.
+- Persisted match-stats file header solved (count, 12-byte
+  aggregate records, six header words); modern-save inventory
+  verified at 317 sections with mixed raw/RLE payloads.
 
 Still open (each needs playtest observation, function-level
 analysis, or both — details in the per-system specs):

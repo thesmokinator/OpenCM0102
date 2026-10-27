@@ -112,9 +112,28 @@ need playtest or function-level analysis).
 - Generic cup engine: pre/qualifying/numbered rounds through
   quarter/semi/final, each with first/second leg, replay(s) and
   decider variants; draws are dated events with automatic mode and
-  byes; ties can be on neutral ground. Draws fully shuffle the
-  entrants, assign home/away per tie at random, and carry byes
-  through. (STRING-EVIDENCE; distribution to confirm by playtest.)
+  byes; ties can be on neutral ground. Each round selects one of
+  three draw modes from its own configuration: a plain random
+  shuffle, a seeding-ordered draw, or a seeding-ordered draw with
+  same-nation avoidance. Seeded modes order entrants by seeding
+  value (highest first) and then deal them into ties from a random
+  starting slot with a wraparound scan, flipping a coin for
+  home/away per tie; byes carry through. (Function-level
+  analysis; exact per-competition mode bindings still open.)
+- Club ranking for seeding is a strength ranking, not a table
+  order: a value term (squad value divided by 400, or by 300 in
+  the alternative accounting mode), plus sixteen times a club
+  strength field, plus the weighted ratings of the best fifteen
+  players under formation-slot weights. League and cup ranking
+  share this key and sort it highest-first. The league-table
+  tiebreak order is a separate mechanism and remains open.
+  (Function-level analysis.)
+- Drawn-tie progression marks each entrant with a status pair:
+  one pair of codes for most round formats and a distinct pair
+  for one specific round mode (numeric mode 140 in the data).
+  Which sporting format mode 140 denotes (two-legged vs
+  single-match is the leading hypothesis) needs playtest
+  confirmation. (Function-level analysis.)
 - Prize money binds to six triggers: match win, match draw, final
   position, round qualification, title, runners-up; amounts are
   per-competition data. (STRING-EVIDENCE)

@@ -90,6 +90,34 @@ become editable data with the 01/02 behaviour as default — see
 - Intake/regen rules, finance formulas, job labels, friendlies:
   needs playtest plus function-level analysis. The pipeline order
   below is our reconstruction until the original's is observed.
+- Function-level status: the job-vacancy filler (best-score
+  selection with a -1,000,000 floor and a 5,000 eligibility
+  threshold on the candidate record) and the regen processor
+  are located and decompiled. Regen consumes the retired-staff
+  list and, when more than two entries are pending, generates
+  that count minus two new players: unattached regens draw two
+  uniform 1–1500 values and one 1–500 value, while attached
+  regens inherit clamped fields from the retiree with
+  strength-ratio gates at one-half and three-quarters and a
+  7,501 threshold branch. Board-confidence outcomes (vote of
+  confidence, patience warnings, sackings with three cause
+  variants) surface as queued news events, so the numeric
+  confidence ladder sits upstream of the news queue and stays
+  open, as do youth-intake counts. The persisted manager-
+  confidence file is a per-manager variable-length record: a
+  main block plus counted dated sub-records. The confidence
+  value itself is a short in the main block on a roughly
+  0–10,000 scale, displayed in six bands: very disappointed
+  below 3,501; unsatisfied to 4,275; satisfied to 6,500;
+  pleased to 8,500; very pleased to 9,500; delighted above.
+  How results move the value remains open. Separately, club
+  finance records board investment: a counter capped at 20
+  pays counter×50,000+75,000 when the balance passes
+  2,250,000 (with a 1-in-40-style random gate), one-off
+  injections of 1,500,000 above a 17,500,000 balance and
+  7,500,000 above 75,000,000 at full counter, and a declining
+  branch of 4,500,000−200,000×counter floored at 1,000,000.
+  (Function-level analysis.)
 
 ## Continue model (implemented)
 

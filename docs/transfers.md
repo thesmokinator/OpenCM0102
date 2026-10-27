@@ -94,3 +94,17 @@ as data" in [architecture.md](architecture.md).
 - Permit formula, AI valuation, tribunal formula, wage/contract
   storage, Bosman thresholds, installment timing, deadline dates:
   needs playtest plus function-level analysis.
+- Function-level status: contract and transfer load/save bodies
+  are fully decompiled (field order enumerable from their read/
+  write sequences). Work permits: a permit is required exactly
+  when the destination club's nation is flagged as
+  permit-requiring and the player holds no exempt (EU/second)
+  nationality. Permits are 14-byte records (player, two counters,
+  expiry season, nation) in a sorted array with a per-player
+  held-flag; a periodic processor grants when the player's
+  qualifying date is within five days of today and otherwise
+  marks a refusal, renewals refresh the expiry and nation and
+  clear the counters, and removal swaps in the last record.
+  Outcomes surface as queued news events (grant / conditional /
+  refusal / expiry / renewal). AI valuation and deadline-date
+  tables remain open. (Function-level analysis.)
