@@ -14,7 +14,8 @@
 //! named constant in this file.
 
 use cm0102_core::{
-    MatchContext, MatchEngine, MatchInjury, MatchPlayer, MatchResult, MatchStats, Mentality,
+    EventKind, MatchContext, MatchEngine, MatchEvent, MatchInjury, MatchPlayer, MatchResult,
+    MatchStats, Mentality,
     Shootout, ATTR_AGGRESSION, ATTR_ATTACKER, ATTR_DIRTINESS, ATTR_FINISHING, ATTR_HANDLING,
     ATTR_HEADING, ATTR_INJURY_PRONENESS, ATTR_JUMPING, ATTR_LONG_SHOTS, ATTR_ONE_ON_ONES,
     ATTR_PENALTIES, ATTR_REFLEXES,
@@ -225,13 +226,15 @@ impl MatchEngine for SimulationEngine {
             ratings: Vec::new(),
             shootout: None,
             injuries: Vec::new(),
+            first_half_end: 45,
         };
-        let mut events: Vec<(u32, String)> = Vec::new();
+        let mut events: Vec<MatchEvent> = Vec::new();
         let mut sides = [
             Side::new(&ctx.home_players, &ctx.home_subs),
             Side::new(&ctx.away_players, &ctx.away_subs),
         ];
-        let mut minutes = full_time(&mut rng);
+        let (mut minutes, first_half_end) = full_time(&mut rng);
+        result.first_half_end = first_half_end;
         play_period(&mut rng, ctx, &mut sides, 1, minutes, &mut result, &mut events);
         if roll(&mut rng, 100) < PENALTY_PERCENT {
             let minute = roll(&mut rng, minutes) + 1;
@@ -261,18 +264,18 @@ impl MatchEngine for SimulationEngine {
                 result.ratings.push(rate(tracker, side, home == 0, minutes));
             }
         }
-        events.sort_by_key(|(minute, _)| *minute);
-        result.events = events
-            .into_iter()
-            .map(|(minute, text)| format!("{minute}' {text}"))
-            .collect();
+        events.sort_by_key(|event| event.minute);
+        result.events = events;
         result
     }
 }
 
-/// 90 minutes plus stoppage time per half.
-fn full_time(rng: &mut ChaCha8Rng) -> u32 {
-    90 + 1 + roll(rng, 2) + 2 + roll(rng, 3)
+/// 90 minutes plus stoppage time per half, with the minute the
+/// first half ended.
+fn full_time(rng: &mut ChaCha8Rng) -> (u32, u32) {
+    let first_half = 1 + roll(rng, 2);
+    let second_half = 2 + roll(rng, 3);
+    (90 + first_half + second_half, 45 + first_half)
 }
 
 /// Play minutes `first..=last` for both sides: bookings, injuries,
@@ -285,14 +288,14 @@ fn play_period(
     first: u32,
     last: u32,
     result: &mut MatchResult,
-    events: &mut Vec<(u32, String)>,
+    events: &mut Vec<MatchEvent>,
 ) {
     for minute in first..=last {
         for home in [true, false] {
             let index = usize::from(home);
-            maybe_book(rng, &mut sides[index], minute, events);
+            maybe_book(rng, &mut sides[index], home, minute, events);
             maybe_injure(rng, &mut sides[index], home, minute, events, result);
-            maybe_substitute(&mut sides[index], minute, events);
+            maybe_substitute(&mut sides[index], home, minute, events);
             if chance_falls(rng, ctx, sides, home) {
                 resolve_chance(rng, sides, home, minute, result, events);
             }
@@ -307,7 +310,7 @@ fn shootout(
     rng: &mut ChaCha8Rng,
     sides: &[Side; 2],
     minute: u32,
-    events: &mut Vec<(u32, String)>,
+    events: &mut Vec<MatchEvent>,
 ) -> Shootout {
     let takers: [Vec<&Tracker>; 2] = [
         order_takers(&sides[0]),
@@ -333,15 +336,13 @@ fn shootout(
         }
     }
     let home_wins = scored[0] > scored[1];
-    events.push((
+    events.push(MatchEvent {
         minute,
-        format!(
-            "{} wins {}-{} on penalties",
-            if home_wins { "Home" } else { "Away" },
-            scored[0],
-            scored[1]
-        ),
-    ));
+        home: home_wins,
+        kind: EventKind::Shootout,
+        player: if home_wins { "Home" } else { "Away" }.to_string(),
+        other: Some(format!("{}-{}", scored[0], scored[1])),
+    });
     Shootout {
         home_scored: scored[0],
         away_scored: scored[1],
@@ -438,8 +439,9 @@ fn bound(player: &MatchPlayer, index: usize) -> u32 {
 fn maybe_book(
     rng: &mut ChaCha8Rng,
     side: &mut Side,
+    home: bool,
     minute: u32,
-    events: &mut Vec<(u32, String)>,
+    events: &mut Vec<MatchEvent>,
 ) {
     if side.pitch.is_empty() || roll(rng, 1000) >= BOOKING_PER_MILLE {
         return;
@@ -473,11 +475,23 @@ fn maybe_book(
     if side.pitch[index].yellow || straight_red {
         let name = side.pitch[index].player.name.clone();
         side.send_off(index, minute, true);
-        events.push((minute, format!("{name} sent off")));
+        events.push(MatchEvent {
+            minute,
+            home,
+            kind: EventKind::Red,
+            player: name,
+            other: None,
+        });
     } else {
         side.pitch[index].yellow = true;
         let name = side.pitch[index].player.name.clone();
-        events.push((minute, format!("{name} (y)")));
+        events.push(MatchEvent {
+            minute,
+            home,
+            kind: EventKind::Yellow,
+            player: name,
+            other: None,
+        });
     }
 }
 
@@ -493,7 +507,7 @@ fn maybe_injure(
     side: &mut Side,
     home: bool,
     minute: u32,
-    events: &mut Vec<(u32, String)>,
+    events: &mut Vec<MatchEvent>,
     result: &mut MatchResult,
 ) {
     if side.pitch.is_empty() || roll(rng, 1000) >= INJURY_PER_MILLE {
@@ -515,16 +529,29 @@ fn maybe_injure(
         draw -= weight;
     }
     let victim = side.pitch[index].player.clone();
-    events.push((minute, format!("{} injured", victim.name)));
+    let days_out = 1 + roll(rng, INJURY_MAX_DAYS);
+    events.push(MatchEvent {
+        minute,
+        home,
+        kind: EventKind::Injury,
+        player: victim.name.clone(),
+        other: Some(days_out.to_string()),
+    });
     result.injuries.push(MatchInjury {
         player_id: victim.id,
         name: victim.name.clone(),
         home,
-        days_out: 1 + roll(rng, INJURY_MAX_DAYS),
+        days_out,
     });
     let name = victim.name;
     if let Some((_, incoming)) = side.substitute(index, minute) {
-        events.push((minute, format!("{incoming} on for {name}")));
+        events.push(MatchEvent {
+            minute,
+            home,
+            kind: EventKind::Sub,
+            player: incoming,
+            other: Some(name),
+        });
     } else {
         side.send_off(index, minute, false);
     }
@@ -532,7 +559,7 @@ fn maybe_injure(
 
 /// Planned tactical substitution: the weakest outfield performer
 /// makes way at the scheduled minutes.
-fn maybe_substitute(side: &mut Side, minute: u32, events: &mut Vec<(u32, String)>) {
+fn maybe_substitute(side: &mut Side, home: bool, minute: u32, events: &mut Vec<MatchEvent>) {
     if !SUB_MINUTES.contains(&minute) || side.subs_used >= MAX_SUBS || side.bench.is_empty() {
         return;
     }
@@ -541,7 +568,13 @@ fn maybe_substitute(side: &mut Side, minute: u32, events: &mut Vec<(u32, String)
         .min_by_key(|i| side.pitch[*i].performance());
     if let Some(index) = weakest {
         if let Some((outgoing, incoming)) = side.substitute(index, minute) {
-            events.push((minute, format!("{incoming} on for {outgoing}")));
+            events.push(MatchEvent {
+                minute,
+                home,
+                kind: EventKind::Sub,
+                player: incoming,
+                other: Some(outgoing),
+            });
         }
     }
 }
@@ -554,7 +587,7 @@ fn resolve_chance(
     home: bool,
     minute: u32,
     result: &mut MatchResult,
-    events: &mut Vec<(u32, String)>,
+    events: &mut Vec<MatchEvent>,
 ) {
     let (attack, defend) = if home { (0, 1) } else { (1, 0) };
     let Some(shooter_index) = pick_shooter(rng, &sides[attack]) else {
@@ -639,7 +672,7 @@ fn score_goal(
     minute: u32,
     scorer: &str,
     result: &mut MatchResult,
-    events: &mut Vec<(u32, String)>,
+    events: &mut Vec<MatchEvent>,
 ) {
     bump_shots(result, home, true);
     if home {
@@ -655,12 +688,30 @@ fn score_goal(
             let culprit = start + roll(rng, span) as usize;
             sides[defend].pitch[culprit].own_goal = true;
             let name = sides[defend].pitch[culprit].player.name.clone();
-            events.push((minute, format!("{name} (og)")));
+            events.push(MatchEvent {
+                minute,
+                home: !home,
+                kind: EventKind::OwnGoal,
+                player: name,
+                other: None,
+            });
         } else {
-            events.push((minute, "Own goal".to_string()));
+            events.push(MatchEvent {
+                minute,
+                home: !home,
+                kind: EventKind::OwnGoal,
+                player: String::new(),
+                other: None,
+            });
         }
     } else {
-        events.push((minute, scorer.to_string()));
+        events.push(MatchEvent {
+            minute,
+            home,
+            kind: EventKind::Goal,
+            player: scorer.to_string(),
+            other: None,
+        });
     }
 }
 
@@ -670,7 +721,7 @@ fn resolve_penalty(
     sides: &mut [Side; 2],
     minute: u32,
     result: &mut MatchResult,
-    events: &mut Vec<(u32, String)>,
+    events: &mut Vec<MatchEvent>,
 ) {
     let home = roll(rng, 2) == 0;
     let side = usize::from(home);
@@ -693,10 +744,22 @@ fn resolve_penalty(
         } else {
             result.away_goals += 1;
         }
-        events.push((minute, format!("{} (pen)", taker.name)));
+        events.push(MatchEvent {
+            minute,
+            home,
+            kind: EventKind::Penalty,
+            player: taker.name.clone(),
+            other: None,
+        });
     } else {
         sides[side].pitch[taker_index].missed_pen = true;
-        events.push((minute, format!("{} (m/pen)", taker.name)));
+        events.push(MatchEvent {
+            minute,
+            home,
+            kind: EventKind::MissedPenalty,
+            player: taker.name.clone(),
+            other: None,
+        });
     }
 }
 
@@ -825,11 +888,10 @@ mod tests {
             .events
             .iter()
             .filter(|event| {
-                !event.contains("(y)")
-                    && !event.contains("sent off")
-                    && !event.contains("on for")
-                    && !event.contains("injured")
-                    && !event.contains("(m/pen)")
+                matches!(
+                    event.kind,
+                    EventKind::Goal | EventKind::Penalty | EventKind::OwnGoal
+                )
             })
             .count()
     }
@@ -850,6 +912,36 @@ mod tests {
             goal_events(&result) as u32,
             result.home_goals + result.away_goals
         );
+    }
+
+    /// The first half ends at 45 plus one or two stoppage minutes.
+    #[test]
+    fn first_half_end_covers_stoppage() {
+        let engine = SimulationEngine;
+        for seed in 0..50 {
+            let end = engine.simulate(&context(seed)).first_half_end;
+            assert!((46..=47).contains(&end), "{end}");
+        }
+    }
+
+    /// Summing per-event goals rebuilds the scoreline, in minute
+    /// order: the live commentary's running score is exact.
+    #[test]
+    fn event_goals_rebuild_scoreline() {
+        let engine = SimulationEngine;
+        for seed in 0..100 {
+            let result = engine.simulate(&context(seed));
+            let (mut home, mut away) = (0, 0);
+            let mut last_minute = 0;
+            for event in &result.events {
+                assert!(event.minute >= last_minute, "out of order");
+                last_minute = event.minute;
+                let (h, a) = event.goals();
+                home += h;
+                away += a;
+            }
+            assert_eq!((home, away), (result.home_goals, result.away_goals));
+        }
     }
 
     /// Goal totals over many seeds stay in a plausible football range.
@@ -953,17 +1045,14 @@ mod tests {
         let (mut cards, mut offs, mut injuries, mut subs) = (0, 0, 0, 0);
         for seed in 0..200 {
             for event in &engine.simulate(&context(seed)).events {
-                if event.contains("(y)") || event.contains("sent off") {
-                    cards += 1;
+                match event.kind {
+                    EventKind::Yellow | EventKind::Red => cards += 1,
+                    EventKind::Injury => injuries += 1,
+                    EventKind::Sub => subs += 1,
+                    _ => {}
                 }
-                if event.contains("sent off") {
+                if event.kind == EventKind::Red {
                     offs += 1;
-                }
-                if event.contains("injured") {
-                    injuries += 1;
-                }
-                if event.contains("on for") {
-                    subs += 1;
                 }
             }
         }

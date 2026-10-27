@@ -240,6 +240,19 @@ impl Schedule {
             .collect()
     }
 
+    /// Earliest unplayed fixture involving `club_id` due on or
+    /// before `date`: the match the manager must play next.
+    pub fn due_unplayed(&self, club_id: u32, date: GameDate) -> Option<&Fixture> {
+        self.fixtures
+            .iter()
+            .filter(|fixture| {
+                fixture.date <= date
+                    && fixture.result.is_none()
+                    && (fixture.home_club_id == club_id || fixture.away_club_id == club_id)
+            })
+            .min_by_key(|fixture| fixture.date)
+    }
+
     /// True when `club_id` has an unplayed fixture on `date`.
     pub fn involves_club_on(&self, club_id: u32, date: GameDate) -> bool {
         self.fixtures.iter().any(|fixture| {
@@ -370,12 +383,18 @@ impl Schedule {
 }
 
 impl DayEventSource for Schedule {
-    /// The managed club's unplayed match days stop Continue; played
+    /// The managed club's unplayed fixtures stop Continue from their
+    /// date on: a match cannot be skipped, only played. Played
     /// fixtures never stop it again. Every other slice of
     /// [`DayEvents`] stays empty until its engine lands.
     fn events_for(&self, date: GameDate, managed_club_id: Option<u32>) -> DayEvents {
-        let own_match =
-            managed_club_id.is_some_and(|id| self.involves_club_on(id, date));
+        let own_match = managed_club_id.is_some_and(|id| {
+            self.fixtures.iter().any(|fixture| {
+                fixture.date <= date
+                    && fixture.result.is_none()
+                    && (fixture.home_club_id == id || fixture.away_club_id == id)
+            })
+        });
         DayEvents {
             own_match,
             ..DayEvents::default()
@@ -492,7 +511,16 @@ mod tests {
         assert!(schedule.events_for(match_day, Some(2)).own_match);
         assert!(!schedule.events_for(match_day, Some(99)).own_match);
         assert!(!schedule.events_for(match_day, None).own_match);
-        assert!(!schedule.events_for(GameDate::new(2001, 7, 2), Some(1)).own_match);
+        // A match cannot be skipped: unplayed fixtures keep stopping
+        // Continue on later days until played.
+        assert!(schedule.events_for(GameDate::new(2001, 7, 2), Some(1)).own_match);
+        let mut played = schedule.clone();
+        let score = FixtureResult {
+            home_goals: 1,
+            away_goals: 0,
+        };
+        assert!(played.record_result(match_day, 1, 2, score, None));
+        assert!(!played.events_for(GameDate::new(2001, 7, 2), Some(1)).own_match);
     }
 
     /// Continue with a real schedule stops on the first own match.

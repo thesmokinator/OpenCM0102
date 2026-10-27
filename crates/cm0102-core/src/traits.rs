@@ -185,6 +185,97 @@ pub struct PlayerRating {
     pub red: bool,
 }
 
+/// What happened in one match incident.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum EventKind {
+    /// Open-play goal for the event's side.
+    Goal,
+    /// Scored penalty.
+    Penalty,
+    /// Missed penalty.
+    MissedPenalty,
+    /// Own goal by the event's side (scores for the other side).
+    OwnGoal,
+    /// Yellow card.
+    Yellow,
+    /// Dismissal (second yellow or straight red).
+    Red,
+    /// Injury forcing a substitution.
+    Injury,
+    /// Planned substitution.
+    Sub,
+    /// Shootout verdict after extra time.
+    Shootout,
+}
+
+/// One minute-stamped incident of a simulated fixture, in
+/// chronological order.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MatchEvent {
+    /// Minute the incident happened (extra time runs past 90).
+    pub minute: u32,
+    /// True when the protagonist plays for the home side.
+    pub home: bool,
+    /// What happened.
+    pub kind: EventKind,
+    /// Protagonist name (scorer, booked player, substitute on).
+    pub player: String,
+    /// Secondary detail: player replaced, injury layoff, shootout
+    /// scoreline.
+    pub other: Option<String>,
+}
+
+impl MatchEvent {
+    /// One-line display, e.g. `12' Henry` or `45' Smith (og)`.
+    pub fn display(&self) -> String {
+        let text = match self.kind {
+            EventKind::Goal => self.player.clone(),
+            EventKind::Penalty => format!("{} (pen)", self.player),
+            EventKind::MissedPenalty => format!("{} (m/pen)", self.player),
+            EventKind::OwnGoal => {
+                if self.player.is_empty() {
+                    "Own goal".to_string()
+                } else {
+                    format!("{} (og)", self.player)
+                }
+            }
+            EventKind::Yellow => format!("{} (y)", self.player),
+            EventKind::Red => format!("{} sent off", self.player),
+            EventKind::Injury => format!("{} injured", self.player),
+            EventKind::Sub => match &self.other {
+                Some(off) => format!("{} on for {off}", self.player),
+                None => format!("{} on", self.player),
+            },
+            EventKind::Shootout => match &self.other {
+                Some(score) => format!("{} wins {score} on penalties", self.player),
+                None => format!("{} win on penalties", self.player),
+            },
+        };
+        format!("{}' {text}", self.minute)
+    }
+
+    /// Goals this incident adds to (home, away).
+    pub fn goals(&self) -> (u32, u32) {
+        match self.kind {
+            EventKind::Goal | EventKind::Penalty => {
+                if self.home {
+                    (1, 0)
+                } else {
+                    (0, 1)
+                }
+            }
+            EventKind::OwnGoal => {
+                if self.home {
+                    (0, 1)
+                } else {
+                    (1, 0)
+                }
+            }
+            _ => (0, 0),
+        }
+    }
+}
+
 /// Outcome of one simulated fixture.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MatchResult {
@@ -192,8 +283,8 @@ pub struct MatchResult {
     pub home_goals: u32,
     /// Goals scored by the away club.
     pub away_goals: u32,
-    /// Human-readable match events, e.g. `12' Henry`.
-    pub events: Vec<String>,
+    /// Match incidents in chronological order.
+    pub events: Vec<MatchEvent>,
     /// Shot counts for both clubs.
     pub stats: MatchStats,
     /// Per-player ratings for everyone who took the pitch.
@@ -202,6 +293,15 @@ pub struct MatchResult {
     pub shootout: Option<Shootout>,
     /// Match injuries with layoffs.
     pub injuries: Vec<MatchInjury>,
+    /// Minute the first half ended (45 plus stoppage). Older
+    /// reports without it read as 45.
+    #[serde(default = "default_first_half_end")]
+    pub first_half_end: u32,
+}
+
+/// First-half end for reports recorded before it existed.
+fn default_first_half_end() -> u32 {
+    45
 }
 
 /// A match simulation engine. Implementations must be deterministic for a

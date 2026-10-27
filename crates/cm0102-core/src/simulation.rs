@@ -119,11 +119,26 @@ pub fn continue_until_event<S: DayEventSource>(
     rules: &ContinueRules,
     source: &S,
 ) -> ContinueOutcome {
+    continue_until_event_with_hook(state, rules, source, &mut |_| {})
+}
+
+/// Same as [`continue_until_event`], but runs `daily` after each day
+/// advance so the application can simulate the day's world (fixtures,
+/// recovery, finance) and push news. Fresh inbox items dated today
+/// feed the inbox stop rule.
+pub fn continue_until_event_with_hook<S: DayEventSource>(
+    state: &mut GameState,
+    rules: &ContinueRules,
+    source: &S,
+    daily: &mut dyn FnMut(&mut GameState),
+) -> ContinueOutcome {
     let mut days_advanced = 0;
     loop {
-        let events = process_day(state, source);
+        let mut events = process_day(state, source);
         days_advanced += 1;
-        if let Some(stop) = match_stop(rules, &events) {
+        daily(state);
+        events.inbox_items += state.fresh_news().len() as u32;
+        if let Some(stop) = stops_for(rules, &events) {
             return ContinueOutcome {
                 days_advanced,
                 stop,
@@ -138,8 +153,10 @@ pub fn continue_until_event<S: DayEventSource>(
     }
 }
 
-/// First matching stop condition, in spec priority order.
-fn match_stop(rules: &ContinueRules, events: &DayEvents) -> Option<StopReason> {
+/// First matching stop condition, in spec priority order. Public
+/// so the application can run its own day loop (its daily hook
+/// needs world access the core hook cannot borrow).
+pub fn stops_for(rules: &ContinueRules, events: &DayEvents) -> Option<StopReason> {
     if rules.stop_on_own_match && events.own_match {
         Some(StopReason::OwnMatch)
     } else if rules.stop_on_inbox && events.inbox_items > 0 {
@@ -230,7 +247,53 @@ mod tests {
             offer_responses: 1,
             ..DayEvents::default()
         };
-        assert_eq!(match_stop(&rules, &events), Some(StopReason::Inbox));
+        assert_eq!(stops_for(&rules, &events), Some(StopReason::Inbox));
+    }
+
+    /// Fresh inbox items pushed by the daily hook stop Continue.
+    #[test]
+    fn hook_news_stops_continue() {
+        use crate::news::NewsCategory;
+        let mut state = GameState::new_season();
+        let rules = ContinueRules {
+            stop_on_own_match: false,
+            max_days: 10,
+            ..ContinueRules::default()
+        };
+        let outcome = continue_until_event_with_hook(
+            &mut state,
+            &rules,
+            &NoEvents,
+            &mut |state| {
+                state.push_news(
+                    NewsCategory::Board,
+                    "headline".to_string(),
+                    "body".to_string(),
+                );
+            },
+        );
+        assert_eq!(outcome.days_advanced, 1);
+        assert_eq!(outcome.stop, StopReason::Inbox);
+    }
+
+    /// Read news never stops Continue again.
+    #[test]
+    fn read_news_does_not_stop() {
+        use crate::news::NewsCategory;
+        let mut state = GameState::new_season();
+        state.push_news(
+            NewsCategory::Board,
+            "headline".to_string(),
+            "body".to_string(),
+        );
+        state.mark_news_read_through_today();
+        let rules = ContinueRules {
+            max_days: 3,
+            ..ContinueRules::default()
+        };
+        let outcome = continue_until_event(&mut state, &rules, &NoEvents);
+        assert_eq!(outcome.days_advanced, 3);
+        assert_eq!(outcome.stop, StopReason::MaxDaysReached);
     }
 
     #[test]

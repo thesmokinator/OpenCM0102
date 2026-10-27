@@ -11,6 +11,7 @@
 pub mod calendar;
 pub mod data;
 pub mod game_state;
+pub mod news;
 pub mod schedule;
 pub mod simulation;
 pub mod tactics;
@@ -36,11 +37,12 @@ pub use tactics::{
     Formation, Lineup, LineupError, Marking, Mentality, PassTo, PlayerInstructions,
     SetPieceRole, TeamInstructions, TeamTactics, LINEUP_SIZE,
 };
+pub use news::{NewsCategory, NewsItem};
 pub use simulation::{
     ContinueOutcome, ContinueRules, DayEvents, DayEventSource, NoEvents, StopReason,
-    continue_until_event, process_day,
+    continue_until_event, continue_until_event_with_hook, process_day, stops_for,
 };
 pub use traits::{
-    DataProvider, MatchContext, MatchEngine, MatchInjury, MatchPlayer, MatchResult, MatchStats,
-    PlayerRating, Shootout,
+    DataProvider, EventKind, MatchContext, MatchEngine, MatchEvent, MatchInjury, MatchPlayer,
+    MatchResult, MatchStats, PlayerRating, Shootout,
 };

@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use crate::calendar::GameDate;
 use crate::data::Manager;
+use crate::news::{NewsCategory, NewsItem};
 use crate::schedule::Schedule;
 use crate::tactics::TeamTactics;
 use crate::traits::MatchResult;
@@ -49,6 +50,12 @@ pub struct GameState {
     /// Season yellow-card counts, by player id.
     #[serde(default)]
     pub yellow_counts: HashMap<u32, u8>,
+    /// Manager inbox, oldest first. Empty in older saves.
+    #[serde(default)]
+    pub news: Vec<NewsItem>,
+    /// Next inbox id to hand out.
+    #[serde(default)]
+    pub next_news_id: u64,
 }
 
 impl GameState {
@@ -63,6 +70,56 @@ impl GameState {
             suspensions: HashMap::new(),
             injuries: HashMap::new(),
             yellow_counts: HashMap::new(),
+            news: Vec::new(),
+            next_news_id: 1,
+        }
+    }
+
+    /// Push an inbox item dated today, returning its id.
+    pub fn push_news(
+        &mut self,
+        category: NewsCategory,
+        headline: String,
+        body: String,
+    ) -> u64 {
+        let id = self.next_news_id;
+        self.next_news_id += 1;
+        self.news.push(NewsItem {
+            id,
+            date: self.current_date,
+            category,
+            headline,
+            body,
+            read: false,
+        });
+        id
+    }
+
+    /// Unread items dated today: fresh news Continue stops for.
+    pub fn fresh_news(&self) -> Vec<&NewsItem> {
+        self.news
+            .iter()
+            .filter(|item| !item.read && item.date == self.current_date)
+            .collect()
+    }
+
+    /// Mark one item read. Returns false for unknown ids.
+    pub fn mark_news_read(&mut self, id: u64) -> bool {
+        if let Some(item) = self.news.iter_mut().find(|item| item.id == id) {
+            item.read = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Mark every item up to today read.
+    pub fn mark_news_read_through_today(&mut self) {
+        let today = self.current_date;
+        for item in &mut self.news {
+            if item.date <= today {
+                item.read = true;
+            }
         }
     }
 
@@ -277,6 +334,7 @@ mod tests {
                 home: true,
                 days_out: 7,
             }],
+            first_half_end: 45,
         };
         state.apply_match_report(&report);
         assert_eq!(state.suspensions.get(&1), Some(&STRAIGHT_RED_BAN));
@@ -315,6 +373,7 @@ mod tests {
                 }],
                 shootout: None,
                 injuries: Vec::new(),
+                first_half_end: 45,
             });
         }
         assert_eq!(state.suspensions.get(&9), Some(&YELLOW_COUNT_BAN));
@@ -329,5 +388,23 @@ mod tests {
         let restored: SavedCareer = serde_json::from_str(json).expect("deserializable");
         assert!(restored.state.schedule.fixtures.is_empty());
         assert_eq!(restored.state.managed_club_id, Some(676));
+    }
+
+    /// Inbox ids ascend; fresh means unread and dated today.
+    #[test]
+    fn news_feed_tracks_fresh_items() {
+        use crate::news::NewsCategory;
+        let mut state = GameState::new_season();
+        let first = state.push_news(NewsCategory::Board, "a".to_string(), "b".to_string());
+        let second = state.push_news(NewsCategory::Board, "c".to_string(), "d".to_string());
+        assert!(second > first);
+        assert_eq!(state.fresh_news().len(), 2);
+        assert!(state.mark_news_read(first));
+        assert!(!state.mark_news_read(999));
+        assert_eq!(state.fresh_news().len(), 1);
+        state.advance_day();
+        assert!(state.fresh_news().is_empty());
+        state.mark_news_read_through_today();
+        assert!(state.news.iter().all(|item| item.read));
     }
 }
