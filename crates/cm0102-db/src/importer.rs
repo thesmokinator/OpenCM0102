@@ -44,9 +44,15 @@ pub fn import_game_data(connection: &mut Connection, source: &dyn GameDataSource
     transaction.execute("DELETE FROM clubs", [])?;
     {
         let mut statement =
-            transaction.prepare("INSERT OR REPLACE INTO clubs (id, name) VALUES (?1, ?2)")?;
+            transaction.prepare(
+                "INSERT OR REPLACE INTO clubs (id, name, league_id) VALUES (?1, ?2, ?3)",
+            )?;
         for club in &clubs {
-            statement.execute(rusqlite::params![i64::from(club.id), club.name])?;
+            statement.execute(rusqlite::params![
+                i64::from(club.id),
+                club.name,
+                club.league_id.map(i64::from),
+            ])?;
         }
         let mut statement = transaction.prepare(
             "INSERT OR REPLACE INTO players \
@@ -200,8 +206,9 @@ pub fn import_game_data(connection: &mut Connection, source: &dyn GameDataSource
                 c.reputation
             ])?;
         }
-        let mut q = transaction
-            .prepare("INSERT OR REPLACE INTO officials VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)")?;
+        let mut q = transaction.prepare(
+            "INSERT OR REPLACE INTO officials VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        )?;
         for o in &officials {
             q.execute(rusqlite::params![
                 o.id,
@@ -211,7 +218,8 @@ pub fn import_game_data(connection: &mut Connection, source: &dyn GameDataSource
                 o.city_id,
                 o.current_ability,
                 o.potential_ability,
-                o.reputation
+                o.reputation,
+                o.strictness,
             ])?;
         }
         let mut q = transaction.prepare(
@@ -263,7 +271,8 @@ pub fn create_schema(connection: &Connection) -> Result<()> {
          );
          CREATE TABLE IF NOT EXISTS clubs (
              id INTEGER PRIMARY KEY,
-             name TEXT NOT NULL
+             name TEXT NOT NULL,
+             league_id INTEGER
          );
          CREATE TABLE IF NOT EXISTS nations (
              id INTEGER PRIMARY KEY, name TEXT NOT NULL, short_name TEXT NOT NULL,
@@ -296,7 +305,7 @@ pub fn create_schema(connection: &Connection) -> Result<()> {
          CREATE TABLE IF NOT EXISTS officials (
              id INTEGER PRIMARY KEY, first_name TEXT NOT NULL, second_name TEXT NOT NULL,
              nation_id INTEGER, city_id INTEGER, current_ability INTEGER,
-             potential_ability INTEGER, reputation INTEGER
+             potential_ability INTEGER, reputation INTEGER, strictness INTEGER
          );
          CREATE TABLE IF NOT EXISTS competition_history (
              id INTEGER PRIMARY KEY, competition_id INTEGER, year INTEGER,
@@ -347,6 +356,8 @@ pub fn create_schema(connection: &Connection) -> Result<()> {
     ] {
         let _ = connection.execute(&format!("ALTER TABLE players ADD COLUMN {column}"), []);
     }
+    let _ = connection.execute("ALTER TABLE clubs ADD COLUMN league_id INTEGER", []);
+    let _ = connection.execute("ALTER TABLE officials ADD COLUMN strictness INTEGER", []);
     Ok(())
 }
 

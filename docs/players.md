@@ -30,19 +30,50 @@ observation is recorded here.
 
 ## Verified so far
 
-- Attribute names and order, CA/PA offsets (PA may be -1/-2),
-  reputation offsets, birth date, job codes 11/5 — all in
-  [dat-format.md](dat-format.md), cross-checked on known people
-  (Henry, Vieira, Bergkamp, Seaman, Wenger).
+- Attribute names and order, CA/PA offsets, reputation offsets,
+  birth date, job codes 11/5 — all in [dat-format.md](dat-format.md),
+  cross-checked on known people (Henry, Vieira, Bergkamp, Seaman,
+  Wenger).
+- Scale facts: attributes are 0–20 with 0 as unset (~74% zeros);
+  CA spans -1–199, PA -2–200 with 4,120 random-potential (-1) and
+  327 (-2) rows; reputations span -1/-2–200 with negative sentinels.
+
+## Findings
+
+Evidence levels: VERIFIED-DATA (imported bytes) vs STRING-EVIDENCE
+(shipped UI text: proves the feature exists, numerics still need
+playtest or function-level analysis).
+
+- Morale shows on a 6-band scale and falls with frequent fining or
+  press speculation; jadedness is a percent with rest bands.
+  (STRING-EVIDENCE)
+- Recovery pipeline: injury, possible surgery, physiotherapy, light
+  training, full training; recurring injuries are curable by long
+  surgery or career-ending. (STRING-EVIDENCE)
+- Training uses named schedule files with 7 categories, 4
+  intensities and per-side/position targeting, plus absence and
+  bust-up events. (STRING-EVIDENCE)
+- Coach reports are tenure-gated with a verdict ladder
+  (first-team member to release) and upside callouts.
+  (STRING-EVIDENCE)
+- Reputation shows in bands up to World Class plus per-nation
+  values; send-off histories and grievances feed it.
+  (STRING-EVIDENCE)
+- Retirement has separate full and international configs; regens
+  key off retired staff ids. (STRING-EVIDENCE)
+- Displayed attribute labels differ from stored names for several
+  attributes; the render mapping is unresolved. (STRING-EVIDENCE,
+  partly open)
 
 ## Rules surface (editable targets)
 
-Development parameters, ageing curves and injury rates should
-become editable data with the 01/02 behaviour as default — see
+Ability scales and bands, growth and ageing curves, training
+categories, injury tables, morale drivers, retirement tables should
+all become editable data with the 01/02 behaviour as default — see
 "Rules as data" in [architecture.md](architecture.md).
 
 ## Open questions
 
-- Every open item in Coverage, verified by observing the original
-  game (attribute growth under training, age curves over seasons,
-  injury frequencies, transfer reactions to reputation).
+- CA formula, PA ranges, growth curves, morale numerics, attribute
+  effects, hidden attributes, label mapping: needs playtest plus
+  function-level analysis.

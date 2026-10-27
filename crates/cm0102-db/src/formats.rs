@@ -61,6 +61,10 @@ pub fn parse_names(data: &[u8]) -> Vec<String> {
 }
 
 /// Parse `club.dat` into clubs, skipping records without a name.
+///
+/// League membership is the `u8` at byte 87 (current season; byte 91
+/// holds the previous season and is not imported yet), equal to the
+/// `club_comp.dat` id for real leagues — see `docs/dat-format.md`.
 pub fn parse_clubs(data: &[u8]) -> Result<Vec<Club>> {
     let mut clubs = Vec::new();
     for record in data.chunks_exact(CLUB_RECORD_SIZE) {
@@ -73,6 +77,7 @@ pub fn parse_clubs(data: &[u8]) -> Result<Vec<Club>> {
         clubs.push(Club {
             id: id as u32,
             name,
+            league_id: record.get(87).map(|byte| u32::from(*byte)),
         });
     }
     Ok(clubs)
@@ -378,6 +383,8 @@ pub struct Official {
     pub potential_ability: Option<i16>,
     /// Reputation.
     pub reputation: Option<i16>,
+    /// Strictness 0-20 (byte 37): the booking descriptor source.
+    pub strictness: u8,
 }
 
 /// One row of a competition history file.
@@ -617,6 +624,7 @@ pub fn parse_officials(
                 current_ability: field_i16(record, 30),
                 potential_ability: field_i16(record, 32),
                 reputation: field_i16(record, 34),
+                strictness: record.get(37).copied().unwrap_or(0),
             })
         })
         .collect()
@@ -717,10 +725,12 @@ mod tests {
         let mut record = vec![0u8; CLUB_RECORD_SIZE];
         record[0..4].copy_from_slice(&676i32.to_le_bytes());
         record[4..11].copy_from_slice(b"Arsenal");
+        record[87] = 7;
         let clubs = parse_clubs(&record).unwrap();
         assert_eq!(clubs.len(), 1);
         assert_eq!(clubs[0].id, 676);
         assert_eq!(clubs[0].name, "Arsenal");
+        assert_eq!(clubs[0].league_id, Some(7));
     }
 
     /// Staff records resolve name ids, the unaligned club id, the birth

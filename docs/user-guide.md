@@ -13,13 +13,43 @@ How to install, import your data and play OpenCM0102.
 - The ISO is only ever read, never modified, and no original game
   file is distributed with or bundled into this program.
 
+## Layout
+
+The window follows three phases. Setup and hub share a chromeless
+shell (slim banner plus content, no sidebar): the hub shows game
+actions, while developer utilities (Data Explorer, Database
+Editor) and Disconnect live in a separate Tools section. Once a
+career starts, the game shell takes over: section sidebar on the
+left, manager/club/date bar on top, Continue bar at the bottom.
+The only ways out of a game are the Menu submenu (back to the hub,
+exit with confirmation) — tools never show while playing. The
+default window is 800×600 and stays resizable.
+
+## Setup Game hub
+
+Every launch lands on the Setup Game hub. Its readiness panel shows
+the two states the app needs: the **ISO image** (not selected, the
+remembered path, or missing when the file moved away) and the
+**database** (ready with club/player counts, or not imported). New
+and restored careers unlock only when the database is ready; with a
+career active, **Return to game** jumps back into it.
+
 ## First launch: importing your data
 
-1. Start OpenCM0102. The setup wizard asks for the ISO image.
+1. Start OpenCM0102. The Setup Game hub asks for the ISO image.
 2. Pick the `.iso` file. The import runs in the background (reading
    the disc, extracting the game data, building the database) while
    the window stays responsive.
-3. When the import finishes, the data explorer opens.
+3. When the import finishes, the Setup Game grid unlocks: Start New
+   Game, Restore Saved Game, Delete Saved Game, Game Settings and
+   Game Credits (with project links). One start mode only — there
+   is no quick start, network play or hall of fame.
+
+If the ISO is remembered but the database is gone, the hub offers
+**Import database** to rebuild it; if the ISO itself moved, it asks
+you to reconnect it or pick the image again. A database imported by
+an older release shows as outdated and careers stay locked until
+you re-import it from the hub.
 
 Your imported data lives in the user data directory:
 
@@ -49,7 +79,8 @@ The explorer is a read-only browser over your imported data:
   non-playing staff.
 - **Player detail**: clicking a player shows all 54 attributes.
 - **Continue** advances the season date by one day. A new game
-  starts on 1 July 2001.
+  starts on 1 July 2001. (The explorer keeps the single-day step
+  as a debug tool; the main menu's Continue is event-driven.)
 
 ## New career
 
@@ -62,14 +93,58 @@ flow:
 4. **Save and start** — review the choices, name the save, start.
 
 The career is saved as `saves/<name>.json` and begins on the first
-day of the season. The explorer header shows the manager's name,
-and the managed club's squad is selected automatically.
+day of the season. Starting or loading a career opens the main
+menu.
+
+## Main menu
+
+The main menu mirrors the original game's main screen: a sidebar
+with one section per area of the game, a top bar showing the
+manager, the club and the date, with **Holiday** (interim: a fixed
+7-day jump) and **Save game** (re-saves the active file), and a
+bottom action bar with **Continue**, which simulates forward to
+the next date needing you (your club's match days today; a safety
+cap bounds each press) and reports why it stopped.
+
+Sections: Squad, Tactics, Training, Fixtures, League Table,
+Transfers, Finances & Info, Board, Staff, Search, News, History,
+Records, Awards, Club Info. Squad shows the managed club's real
+squad, Fixtures shows your league results and upcoming rounds,
+and Tactics shows your formation and starting eleven (auto-picked
+by ability, changeable formation, click-to-swap with reserves;
+suspended and injured players are marked and cannot be picked):
+press Continue to reach the first match day — the next match is
+always shown under the top bar — and the game takes you into the
+match-day screen: pre-match build-up (venue, weather and pitch,
+referee with his strictness tag), **Play Match**, then the
+live commentary (with speed control and a half-time pause) up to
+the full-time report with attendance, stats and ratings.
+Frozen or waterlogged pitches can postpone a fixture by a week,
+with a news item telling you. Other due fixtures
+are simulated automatically with a results roundup in your inbox;
+clicking a result row re-opens its match report. The League Table
+section shows the standings from all played results. Fresh news
+— reports, injuries, bans, board verdicts — interrupts Continue
+and is presented first; the News section keeps every item. When
+the season's fixtures run
+out, next year's calendar generates automatically. Every other
+section is an honest placeholder
+citing the spec in `docs/` that will back it, implemented phase
+by phase (see [roadmap.md](roadmap.md)).
+
+## Language
+
+The interface language is negotiated from your operating system on
+first launch (English fallback) and can be switched live in Game
+Settings. Only English ships today; each new locale is one
+`app/i18n/<lang>/` directory.
 
 ## Load career
 
-`Load career` in the Settings menu lists every saved career with
-manager, club and in-game date. `Refresh` rescans the directory.
-Loading a save resumes it exactly where it was left.
+`Restore Saved Game` lists every saved career with manager, club
+and in-game date. `Refresh` rescans the directory. Each row also
+offers `Delete` with two-click confirmation. Loading a save
+resumes it exactly where it was left.
 
 Saves are versioned: if a save was written by a newer release than
 the one you run, loading is refused with an explicit error instead

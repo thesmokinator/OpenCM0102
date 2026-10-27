@@ -16,12 +16,19 @@
 
 mod career;
 mod editor;
+mod matchday;
+mod news;
+mod setup;
+mod shell;
 
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::Arc;
 
-use cm0102_core::{Club, DataProvider, GameState, Player};
+use cm0102_core::{
+    Club, ContinueOutcome, ContinueRules, DataProvider, GameState, Player, Schedule, StopReason,
+    process_day, stops_for,
+};
 use cm0102_db::{
     import_game_data, import_inventory, validate_source, CabinetSource, GameDataSource, IsoSource,
     SqliteDataProvider, ValidationReport,
@@ -41,6 +48,28 @@ enum Screen {
     NewCareer,
     /// Load a previously saved native career.
     LoadCareer,
+    /// Main-menu shell: sidebar sections for the active career.
+    Game,
+    /// Game settings (knobs unlock with their engines).
+    GameSettings,
+    /// Project credits and links.
+    Credits,
+}
+
+impl Screen {
+    /// Banner subtitle naming the current screen.
+    fn subtitle(self) -> String {
+        crate::i18n::t(match self {
+            Screen::SetupWizard => "screen-setup-game",
+            Screen::DataExplorer => "screen-data-explorer",
+            Screen::DatabaseEditor => "screen-database-editor",
+            Screen::NewCareer => "screen-new-career",
+            Screen::LoadCareer => "screen-load-career",
+            Screen::Game => "screen-main-menu",
+            Screen::GameSettings => "screen-game-settings",
+            Screen::Credits => "screen-credits",
+        })
+    }
 }
 
 /// Events sent by the background import thread.
@@ -97,6 +126,18 @@ pub struct OpenCmApp {
     db_path: Option<PathBuf>,
     editor: EditorState,
     career: career::CareerState,
+    shell: shell::ShellState,
+    /// Exit confirmation dialog armed (in-game exits confirm).
+    exit_armed: bool,
+    /// Player's game Data directory with events/weather cfg files.
+    game_data_dir: Option<PathBuf>,
+    /// Active commentary pack (built-in unless the data dir has one).
+    commentary_pack: cm0102_match::CommentaryPack,
+    /// Active climate table (built-in unless the data dir has one).
+    weather_table: cm0102_core::WeatherTable,
+    /// Splash background texture and size, decoded once from the
+    /// embedded pixel art.
+    splash_tex: Option<(egui::TextureHandle, egui::Vec2)>,
 }
 
 impl OpenCmApp {
@@ -119,16 +160,79 @@ impl OpenCmApp {
             player_filter: String::new(),
             filtered_squad: Vec::new(),
             player_count: 0,
-            status: "Choose the ISO image of your CM 01/02 disc to begin.".to_string(),
+            status: crate::i18n::t("app-choose-iso"),
             error: None,
             import_receiver: None,
             import_stage: String::new(),
             db_path: None,
             editor: EditorState::default(),
             career: career::CareerState::default(),
+            shell: shell::ShellState::default(),
+            exit_armed: false,
+            game_data_dir: None,
+            commentary_pack: cm0102_match::CommentaryPack::builtin()
+                .unwrap_or_default(),
+            weather_table: cm0102_core::WeatherTable::builtin(),
+            splash_tex: None,
         };
         app.restore_session();
+        app.restore_data_dir();
         app
+    }
+
+    /// Restore the game data dir (env override wins) and load its
+    /// commentary pack, falling back to built-in.
+    fn restore_data_dir(&mut self) {
+        if let Some(dir) = std::env::var_os("OPENCM0102_DATA_DIR").map(PathBuf::from) {
+            self.game_data_dir = Some(dir);
+        } else if let Some(dir) = read_game_data_dir() {
+            self.game_data_dir = Some(dir);
+        } else {
+            let local = PathBuf::from("Data");
+            if local.join("events_eng.cfg").is_file() {
+                self.game_data_dir = Some(local);
+            }
+        }
+        self.reload_commentary_pack();
+        self.reload_weather_table();
+    }
+
+    /// Load `events_eng.cfg` from the data dir when present and
+    /// valid, else keep the built-in pack.
+    fn reload_commentary_pack(&mut self) {
+        let Some(dir) = &self.game_data_dir else {
+            return;
+        };
+        let path = dir.join("events_eng.cfg");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        // Original files are Windows text: decode lossily.
+        let text = String::from_utf8_lossy(&bytes);
+        if let Ok(pack) = cm0102_match::CommentaryPack::parse(&text) {
+            if !pack.is_empty() {
+                self.commentary_pack = pack;
+            }
+        }
+    }
+
+    /// Load `weather.cfg` from the data dir when present and valid,
+    /// else keep the built-in table.
+    fn reload_weather_table(&mut self) {
+        let Some(dir) = &self.game_data_dir else {
+            return;
+        };
+        let path = dir.join("weather.cfg");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        // Original files are Windows text: decode lossily.
+        let text = String::from_utf8_lossy(&bytes);
+        if let Ok(table) = cm0102_core::WeatherTable::parse(&text) {
+            if !table.zones.is_empty() {
+                self.weather_table = table;
+            }
+        }
     }
 
     /// Reopen the imported database when a saved session exists.
@@ -144,17 +248,13 @@ impl OpenCmApp {
             return;
         };
         if !iso_path.is_file() {
-            self.error = Some(format!(
-                "The last ISO image was not found at {}. Reconnect it or disconnect.",
-                iso_path.display()
-            ));
+            let path = iso_path.display().to_string();
+            self.error = Some(crate::i18n::tr("app-iso-missing", &[("path", &path)]));
             return;
         }
         if !db_path.is_file() {
-            self.status = format!(
-                "Saved ISO found at {}, but no imported database yet. Import it to continue.",
-                iso_path.display()
-            );
+            let path = iso_path.display().to_string();
+            self.status = crate::i18n::tr("app-no-database", &[("path", &path)]);
             return;
         }
         match SqliteDataProvider::open(&db_path) {
@@ -163,14 +263,18 @@ impl OpenCmApp {
                 self.clubs = provider.list_clubs().unwrap_or_default();
                 self.refresh_club_filter();
                 self.player_count = provider.count_players().unwrap_or(0);
-                self.source_description = format!("ISO image: {}", iso_path.display());
+                let path = iso_path.display().to_string();
+                self.source_description = crate::i18n::tr("app-iso-image", &[("path", &path)]);
                 self.db_path = Some(db_path);
                 self.provider = Some(provider);
-                self.screen = Screen::DataExplorer;
-                self.status = "Session restored from the imported database.".to_string();
+                // Every launch lands on the Setup Game hub; the user
+                // picks New / Restore / Return from there.
+                self.screen = Screen::SetupWizard;
+                self.status = crate::i18n::t("app-session-restored");
             }
             Err(error) => {
-                self.error = Some(format!("cannot reopen the imported database: {error}"));
+                let error = error.to_string();
+                self.error = Some(crate::i18n::tr("app-cannot-reopen", &[("error", &error)]));
             }
         }
     }
@@ -193,14 +297,134 @@ impl OpenCmApp {
         self.state = GameState::new_season();
         self.screen = Screen::SetupWizard;
         self.error = None;
-        self.status = "Disconnected. Choose the ISO image to import again.".to_string();
+        self.status = crate::i18n::t("app-disconnected");
+    }
+
+    /// One Continue press: present fresh news first, else simulate
+    /// days until the next manager-facing event, then roll the
+    /// calendar into a new season when exhausted. Own match days
+    /// enter the match-day screen instead of returning.
+    fn advance_continue(&mut self) {
+        use crate::i18n::{t, tr};
+        if !self.state.fresh_news().is_empty() {
+            self.open_news_queue();
+            self.status = t("shell-stop-inbox");
+            return;
+        }
+        let rules = ContinueRules::default();
+        let had_calendar = !self.state.schedule.fixtures.is_empty();
+        let mut days_advanced = 0;
+        let mut stop = StopReason::MaxDaysReached;
+        loop {
+            let schedule = self.state.schedule.clone();
+            let mut events = process_day(&mut self.state, &schedule);
+            days_advanced += 1;
+            self.simulate_day(false);
+            events.inbox_items += self.state.fresh_news().len() as u32;
+            if let Some(matched) = stops_for(&rules, &events) {
+                stop = matched;
+                break;
+            }
+            if days_advanced >= rules.max_days.max(1) {
+                break;
+            }
+        }
+        let outcome = ContinueOutcome {
+            days_advanced,
+            stop,
+        };
+        let date = self.state.current_date.to_string();
+        let reason = if had_calendar {
+            match outcome.stop {
+                StopReason::OwnMatch => t("shell-stop-own-match"),
+                StopReason::Inbox => t("shell-stop-inbox"),
+                StopReason::OfferResponse => t("shell-stop-offer"),
+                StopReason::Deadline => t("shell-stop-deadline"),
+                StopReason::MaxDaysReached => {
+                    let days = outcome.days_advanced.to_string();
+                    tr("shell-stop-max-days", &[("days", &days)])
+                }
+            }
+        } else {
+            t("shell-stop-no-calendar")
+        };
+        let mut status = tr(
+            "shell-continue-report",
+            &[("date", &date), ("reason", &reason)],
+        );
+        if self.rollover_calendar_if_needed() {
+            let count = self.state.schedule.fixtures.len().to_string();
+            status = format!("{status} {}", tr("shell-new-season", &[("count", &count)]));
+        }
+        self.status = status;
+        if outcome.stop == StopReason::OwnMatch {
+            self.enter_match_day();
+        } else if !self.state.fresh_news().is_empty() {
+            self.open_news_queue();
+        }
+    }
+
+    /// Generate next season's calendar once the current one has no
+    /// fixtures left on or after today. Years advance until the fresh
+    /// calendar covers today, so deep holidays and old saves land on a
+    /// playable season. Returns true when a new calendar was installed.
+    /// Membership is the current-season snapshot: promotion and
+    /// relegation between seasons are still open.
+    fn rollover_calendar_if_needed(&mut self) -> bool {
+        let Some(club_id) = self.state.managed_club_id else {
+            return false;
+        };
+        if !self.state.schedule.is_exhausted(self.state.current_date) {
+            return false;
+        }
+        let Some(managed) = self.clubs.iter().find(|club| club.id == club_id).cloned()
+        else {
+            return false;
+        };
+        let Some(schedule) = Schedule::next_season(&managed, &self.clubs, self.state.current_date)
+        else {
+            return false;
+        };
+        self.state.schedule = schedule;
+        self.state.reset_season_cards();
+        true
+    }
+
+    /// Current ISO readiness from the saved session.
+    fn iso_state(&self) -> IsoState {
+        match read_session() {
+            None => IsoState::Missing,
+            Some(path) => IsoState::Selected {
+                present: path.is_file(),
+                path,
+            },
+        }
+    }
+
+    /// True when the imported database is open and usable.
+    fn db_ready(&self) -> bool {
+        self.provider.is_some()
+    }
+
+    /// True when the database carries league membership. A database
+    /// imported before leagues existed opens fine but cannot build
+    /// calendars (or start fair careers) until it is re-imported.
+    fn leagues_ready(&self) -> bool {
+        self.db_ready() && self.clubs.iter().any(|club| club.league_id.is_some())
+    }
+
+    /// True when the game shell owns the window: an active career on
+    /// the main-menu screen. Everywhere else the hub shell (banner
+    /// plus content, no sidebar) is shown.
+    fn in_game_shell(&self) -> bool {
+        self.state.managed_club_id.is_some() && self.screen == Screen::Game
     }
 
     /// Start the background import of the ISO at `iso_path`.
     fn start_import(&mut self, iso_path: PathBuf) {
         let (sender, receiver) = mpsc::channel();
         self.import_receiver = Some(receiver);
-        self.import_stage = "Starting import…".to_string();
+        self.import_stage = crate::i18n::t("app-starting-import");
         self.error = None;
 
         std::thread::spawn(move || {
@@ -227,7 +451,7 @@ impl OpenCmApp {
                 }
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    finished = Some(Err("import thread stopped unexpectedly".to_string()));
+                    finished = Some(Err(crate::i18n::t("app-import-thread-died")));
                     break;
                 }
             }
@@ -259,15 +483,20 @@ impl OpenCmApp {
                 self.provider = Some(provider);
                 self.editor = EditorState::default();
                 self.career = career::CareerState::default();
-                self.screen = Screen::DataExplorer;
-                self.status = format!(
-                    "Imported into {}. {} players and staff available.",
-                    outcome.db_path.display(),
-                    self.player_count
+                self.screen = Screen::SetupWizard;
+                let path = outcome.db_path.display().to_string();
+                let count = self.player_count.to_string();
+                self.status = crate::i18n::tr(
+                    "app-imported",
+                    &[("path", &path), ("count", &count)],
                 );
             }
             Err(error) => {
-                self.error = Some(format!("cannot reopen database: {error}"));
+                let error = error.to_string();
+                self.error = Some(crate::i18n::tr(
+                    "app-cannot-reopen-database",
+                    &[("error", &error)],
+                ));
             }
         }
     }
@@ -310,62 +539,34 @@ impl OpenCmApp {
             .collect();
     }
 
-    /// Setup-wizard screen: pick the ISO image of the original disc.
-    fn show_setup_wizard(&mut self, ui: &mut egui::Ui, importing: bool) {
-        ui.heading("OpenCM0102 — Setup");
-        ui.label(
-            "Select the ISO image of your own CM 01/02 disc. \
-             Nothing from the original game is bundled with this program, \
-             and the image is only read, never modified. \
-             If you own the physical CD, create an ISO image of it first \
-             with your operating system's disc tools.",
-        );
-        ui.add_space(12.0);
-
-        if importing {
-            ui.horizontal(|ui| {
-                ui.add(egui::Spinner::new());
-                ui.label(&self.import_stage);
-            });
-        } else if ui.button("Select ISO image…").clicked() {
-            if let Some(file) = rfd::FileDialog::new()
-                .add_filter("ISO image", &["iso"])
-                .pick_file()
-            {
-                self.start_import(file);
-            }
-        }
-
-        ui.add_space(12.0);
-        ui.label(&self.status);
-        if let Some(error) = &self.error {
-            ui.colored_label(egui::Color32::LIGHT_RED, error);
-            if read_session().is_some() && ui.button("Disconnect").clicked() {
-                self.disconnect();
-            }
-        }
-    }
-
     /// Data-explorer screen: clubs on the left, squad on the right.
     fn show_data_explorer(&mut self, ui: &mut egui::Ui) {
+        use crate::i18n::{t, tr};
         ui.horizontal(|ui| {
-            ui.heading("Data Explorer");
+            ui.heading(t("screen-data-explorer"));
+            ui.separator();
+            if ui.button(t("career-back-to-setup")).clicked() {
+                self.screen = Screen::SetupWizard;
+            }
             ui.separator();
             ui.label(&self.source_description);
             if let Some(report) = &self.report {
                 ui.separator();
-                ui.label(format!("{} .dat files", report.dat_files.len()));
+                let count = report.dat_files.len().to_string();
+                ui.label(tr("explorer-dat-files", &[("count", &count)]));
             }
             ui.separator();
-            ui.label(format!("Season date: {}", self.state.current_date));
+            let date = self.state.current_date.to_string();
+            ui.label(tr("explorer-season-date", &[("date", &date)]));
             if let Some(manager) = &self.state.manager {
                 ui.separator();
-                ui.label(format!("Manager: {}", manager.full_name()));
+                let name = manager.full_name();
+                ui.label(tr("explorer-manager", &[("name", &name)]));
             }
-            if ui.button("Continue").clicked() {
+            if ui.button(t("shell-continue")).clicked() {
                 self.state.advance_day();
             }
-            if ui.button("New career").clicked() {
+            if ui.button(t("explorer-new-career")).clicked() {
                 self.start_new_career();
             }
         });
@@ -373,7 +574,7 @@ impl OpenCmApp {
         ui.separator();
 
         if self.clubs.is_empty() {
-            ui.label("No clubs imported yet.");
+            ui.label(t("explorer-no-clubs"));
             return;
         }
 
@@ -381,22 +582,20 @@ impl OpenCmApp {
         egui::SidePanel::left("club_list")
             .resizable(true)
             .show_inside(ui, |ui| {
-                ui.heading("Clubs");
+                ui.heading(t("explorer-clubs"));
                 if ui
                     .add(
                         egui::TextEdit::singleline(&mut self.club_filter)
-                            .hint_text("Filter clubs…")
+                            .hint_text(t("filter-clubs"))
                             .desired_width(f32::INFINITY),
                     )
                     .changed()
                 {
                     self.refresh_club_filter();
                 }
-                ui.label(format!(
-                    "{} of {} clubs",
-                    self.filtered_clubs.len(),
-                    self.clubs.len()
-                ));
+                let shown = self.filtered_clubs.len().to_string();
+                let total = self.clubs.len().to_string();
+                ui.label(tr("clubs-count", &[("shown", &shown), ("total", &total)]));
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for club in self.filtered_clubs.iter().take(RENDER_LIMIT) {
                         let selected = self.selected_club_id == Some(club.id);
@@ -406,9 +605,8 @@ impl OpenCmApp {
                         }
                     }
                     if self.filtered_clubs.len() > RENDER_LIMIT {
-                        ui.label(format!(
-                            "…showing the first {RENDER_LIMIT}; refine the filter."
-                        ));
+                        let limit = RENDER_LIMIT.to_string();
+                        ui.label(tr("refine-filter", &[("limit", &limit)]));
                     }
                 });
             });
@@ -417,10 +615,10 @@ impl OpenCmApp {
         }
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            ui.heading("Squad");
+            ui.heading(t("section-squad"));
             ui.horizontal(|ui| {
                 if ui
-                    .checkbox(&mut self.players_only, "Players only")
+                    .checkbox(&mut self.players_only, t("explorer-players-only"))
                     .changed()
                 {
                     self.refresh_player_filter();
@@ -428,26 +626,27 @@ impl OpenCmApp {
                 if ui
                     .add(
                         egui::TextEdit::singleline(&mut self.player_filter)
-                            .hint_text("Filter players…")
+                            .hint_text(t("filter-players"))
                             .desired_width(240.0),
                     )
                     .changed()
                 {
                     self.refresh_player_filter();
                 }
-                ui.label(format!(
-                    "{} of {}",
-                    self.filtered_squad.len(),
-                    self.squad.len()
+                let shown = self.filtered_squad.len().to_string();
+                let total = self.squad.len().to_string();
+                ui.label(tr(
+                    "explorer-players-count",
+                    &[("shown", &shown), ("total", &total)],
                 ));
             });
             egui::ScrollArea::vertical().show(ui, |ui| {
                 egui::Grid::new("squad_grid").striped(true).show(ui, |ui| {
-                    ui.strong("Name");
-                    ui.strong("Role");
-                    ui.strong("Born");
-                    ui.strong("CA");
-                    ui.strong("PA");
+                    ui.strong(t("shell-th-name"));
+                    ui.strong(t("shell-th-role"));
+                    ui.strong(t("explorer-th-born"));
+                    ui.strong(t("shell-th-ca"));
+                    ui.strong(t("shell-th-pa"));
                     ui.end_row();
                     for player in self.filtered_squad.iter().take(RENDER_LIMIT) {
                         let selected = self
@@ -462,19 +661,19 @@ impl OpenCmApp {
                             player
                                 .birth_date
                                 .map(|date| date.to_string())
-                                .unwrap_or_else(|| "—".to_string()),
+                                .unwrap_or_else(|| t("missing-value")),
                         );
                         ui.label(
                             player
                                 .current_ability
                                 .map(|value| value.to_string())
-                                .unwrap_or_else(|| "—".to_string()),
+                                .unwrap_or_else(|| t("missing-value")),
                         );
                         ui.label(
                             player
                                 .potential_ability
                                 .map(|value| value.to_string())
-                                .unwrap_or_else(|| "—".to_string()),
+                                .unwrap_or_else(|| t("missing-value")),
                         );
                         ui.end_row();
                     }
@@ -486,12 +685,19 @@ impl OpenCmApp {
             egui::TopBottomPanel::bottom("player_detail")
                 .resizable(true)
                 .show_inside(ui, |ui| {
-                    ui.heading(format!(
-                        "{} — {} — CA {:?} / PA {:?}",
-                        player.full_name(),
-                        role_label(player.job),
-                        player.current_ability,
-                        player.potential_ability
+                    let name = player.full_name();
+                    let role = role_label(player.job);
+                    let ca = player
+                        .current_ability
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| t("missing-value"));
+                    let pa = player
+                        .potential_ability
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| t("missing-value"));
+                    ui.heading(tr(
+                        "explorer-player-detail",
+                        &[("name", &name), ("role", &role), ("ca", &ca), ("pa", &pa)],
                     ));
                     if !player.attributes.is_empty() {
                         egui::Grid::new("attribute_grid")
@@ -516,68 +722,162 @@ impl OpenCmApp {
 }
 
 impl eframe::App for OpenCmApp {
-    /// Draw the menu bar and the current screen, polling the import job.
+    /// Draw the phase shell and the current screen, polling the
+    /// import job. Setup/hub phases share a chromeless shell (banner
+    /// plus content); the game phase owns the full game shell.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let importing = self.poll_import(ctx);
+        if self.in_game_shell() {
+            self.show_game_shell(ctx);
+        } else {
+            self.show_hub_shell(ctx, importing);
+        }
+        self.show_exit_confirm(ctx);
+    }
+}
 
-        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
-                ui.menu_button("Settings", |ui| {
-                    if ui
-                        .add_enabled(
-                            self.provider.is_some(),
-                            egui::Button::new("Database editor"),
-                        )
-                        .clicked()
-                    {
-                        self.screen = Screen::DatabaseEditor;
-                        self.editor.loaded = false;
-                        ui.close_menu();
-                    }
-                    if ui
-                        .add_enabled(self.provider.is_some(), egui::Button::new("Data explorer"))
-                        .clicked()
-                    {
-                        self.screen = Screen::DataExplorer;
-                        ui.close_menu();
-                    }
-                    if ui
-                        .add_enabled(self.provider.is_some(), egui::Button::new("New career"))
-                        .clicked()
-                    {
-                        self.start_new_career();
-                        ui.close_menu();
-                    }
-                    if ui
-                        .add_enabled(self.provider.is_some(), egui::Button::new("Load career"))
-                        .clicked()
-                    {
-                        self.show_load_career_entry();
-                        ui.close_menu();
-                    }
-                    if ui
-                        .add_enabled(read_session().is_some(), egui::Button::new("Disconnect"))
-                        .clicked()
-                    {
-                        self.disconnect();
-                        ui.close_menu();
+impl OpenCmApp {
+    /// Hub shell: slim banner plus content, no sidebar. Covers the
+    /// setup and hub phases and every screen reachable from them.
+    fn show_hub_shell(&mut self, ctx: &egui::Context, importing: bool) {
+        if self.screen == Screen::Game {
+            // Unreachable through the UI (the game shell owns Game),
+            // but never strand the user on a blank screen.
+            self.screen = Screen::SetupWizard;
+        }
+        // The splash carries its own title over full-bleed art.
+        let splash = self.screen == Screen::SetupWizard && !self.leagues_ready();
+        if !splash {
+            egui::TopBottomPanel::top("banner").show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("OpenCM0102");
+                    ui.separator();
+                    ui.label(self.screen.subtitle());
+                    if importing {
+                        ui.separator();
+                        ui.add(egui::Spinner::new());
+                        ui.label(&self.import_stage);
                     }
                 });
-                if importing {
-                    ui.separator();
-                    ui.add(egui::Spinner::new());
-                    ui.label(&self.import_stage);
-                }
+            });
+        }
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            if splash {
+                self.show_setup_game(ui, importing);
+                return;
+            }
+            // Every hub screen scrolls: nothing can overflow.
+            egui::ScrollArea::vertical().show(ui, |ui| match self.screen {
+                Screen::SetupWizard => self.show_setup_game(ui, importing),
+                Screen::DataExplorer => self.show_data_explorer(ui),
+                Screen::DatabaseEditor => self.show_database_editor(ui),
+                Screen::NewCareer => self.show_new_career(ui),
+                Screen::LoadCareer => self.show_load_career(ui),
+                Screen::GameSettings => self.show_game_settings(ui),
+                Screen::Credits => self.show_credits(ui),
+                Screen::Game => self.show_setup_game(ui, importing),
+            });
+        });
+    }
+
+    /// Game shell: fixed info headerbar, scrollable center, fixed
+    /// action footerbar. The only ways out are the Menu submenu and
+    /// the exit dialog. Continue hides on match days: the match
+    /// must be played first.
+    fn show_game_shell(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("game_header").show(ctx, |ui| {
+            self.show_game_header(ui);
+        });
+        egui::TopBottomPanel::bottom("action_bar").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(&self.status);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Main action bar: one primary action per phase.
+                    match self.match_phase() {
+                        matchday::MatchPhase::Hub => {
+                            if ui.button(crate::i18n::t("shell-continue")).clicked() {
+                                self.advance_continue();
+                            }
+                            if ui.button(crate::i18n::t("shell-holiday-7-days")).clicked() {
+                                self.holiday_week();
+                            }
+                        }
+                        matchday::MatchPhase::Prematch => {
+                            if crate::theme::primary_button(
+                                ui,
+                                &crate::i18n::t("matchday-play-match"),
+                            )
+                            .clicked()
+                            {
+                                self.kick_off();
+                            }
+                            if ui.button(crate::i18n::t("shell-holiday-7-days")).clicked() {
+                                self.holiday_week();
+                            }
+                        }
+                        matchday::MatchPhase::Live => {
+                            self.show_speed_combo(ui);
+                        }
+                        matchday::MatchPhase::HalfTime => {
+                            if crate::theme::primary_button(
+                                ui,
+                                &crate::i18n::t("matchday-second-half"),
+                            )
+                            .clicked()
+                            {
+                                self.start_second_half();
+                            }
+                            self.show_speed_combo(ui);
+                        }
+                        matchday::MatchPhase::FullTime => {
+                            if ui.button(crate::i18n::t("matchday-back")).clicked() {
+                                self.shell.match_day = None;
+                                self.open_news_queue();
+                            }
+                        }
+                    }
+                });
             });
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| match self.screen {
-            Screen::SetupWizard => self.show_setup_wizard(ui, importing),
-            Screen::DataExplorer => self.show_data_explorer(ui),
-            Screen::DatabaseEditor => self.show_database_editor(ui),
-            Screen::NewCareer => self.show_new_career(ui),
-            Screen::LoadCareer => self.show_load_career(ui),
+        egui::CentralPanel::default().show(ctx, |ui| {
+            if self.shell.match_day.is_some() {
+                // Match days own their layout (fixed scoreboard,
+                // internal scrolling feed).
+                self.show_game(ui);
+            } else {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    self.show_game(ui);
+                });
+            }
         });
+        self.show_news_queue(ctx);
+    }
+
+    /// Modal exit confirmation, armed from the in-game Menu submenu.
+    fn show_exit_confirm(&mut self, ctx: &egui::Context) {
+        if !self.exit_armed {
+            return;
+        }
+        use crate::i18n::t;
+        egui::Window::new(t("shell-exit-title"))
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.label(t("shell-exit-body"));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button(t("action-exit-game")).clicked() {
+                        ui.ctx()
+                            .send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    if ui.button(t("action-cancel")).clicked() {
+                        self.exit_armed = false;
+                    }
+                });
+            });
     }
 }
 
@@ -587,43 +887,60 @@ fn run_import(
     iso_path: &std::path::Path,
     progress: &dyn Fn(&str),
 ) -> Result<ImportOutcome, String> {
-    progress("Opening ISO image…");
+    use crate::i18n::{t, tr};
+    progress(&t("app-progress-opening-iso"));
     let iso = IsoSource::new(iso_path.to_path_buf()).map_err(|e| e.to_string())?;
-    progress("Reading InstallShield cabinet…");
+    progress(&t("app-progress-cabinet"));
     let source = CabinetSource::from_iso(&iso).map_err(|e| e.to_string())?;
 
-    progress("Validating game data…");
+    progress(&t("app-progress-validating"));
     let report = validate_source(&source).map_err(|e| e.to_string())?;
 
     let db_path = database_path().map_err(|e| e.to_string())?;
     if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("cannot create data directory: {e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| {
+            let error = e.to_string();
+            tr("app-cannot-create-data-dir", &[("error", &error)])
+        })?;
     }
-    let mut connection =
-        rusqlite::Connection::open(&db_path).map_err(|e| format!("cannot open database: {e}"))?;
+    let mut connection = rusqlite::Connection::open(&db_path).map_err(|e| {
+        let error = e.to_string();
+        tr("app-cannot-open-database", &[("error", &error)])
+    })?;
 
-    progress("Importing file inventory…");
-    import_inventory(&mut connection, &source).map_err(|e| format!("import failed: {e}"))?;
+    progress(&t("app-progress-inventory"));
+    import_inventory(&mut connection, &source).map_err(|e| {
+        let error = e.to_string();
+        tr("app-import-failed", &[("error", &error)])
+    })?;
 
-    progress("Importing clubs, players and every database table…");
-    import_game_data(&mut connection, &source)
-        .map_err(|e| format!("game-data import failed: {e}"))?;
+    progress(&t("app-progress-game-data"));
+    import_game_data(&mut connection, &source).map_err(|e| {
+        let error = e.to_string();
+        tr("app-game-data-failed", &[("error", &error)])
+    })?;
     drop(connection);
 
-    progress("Extracting game-data files…");
+    progress(&t("app-progress-extracting"));
     let extracted_dir = db_path
         .parent()
         .map(|parent| parent.join("extracted"))
         .unwrap_or_default();
     for path in &report.dat_files {
-        let bytes = source
-            .read_entry(path)
-            .map_err(|e| format!("extraction failed for {path}: {e}"))?;
+        let bytes = source.read_entry(path).map_err(|e| {
+            let error = e.to_string();
+            tr("app-extraction-failed", &[("path", path), ("error", &error)])
+        })?;
         let file_name = path.rsplit('/').next().unwrap_or(path);
         std::fs::create_dir_all(&extracted_dir)
             .and_then(|()| std::fs::write(extracted_dir.join(file_name), &bytes))
-            .map_err(|e| format!("cannot write extracted file {file_name}: {e}"))?;
+            .map_err(|e| {
+                let error = e.to_string();
+                tr(
+                    "app-cannot-write-file",
+                    &[("file", file_name), ("error", &error)],
+                )
+            })?;
     }
 
     Ok(ImportOutcome {
@@ -639,6 +956,15 @@ fn run_import(
 /// frame would visibly hitch, so the list asks for a narrower filter.
 const RENDER_LIMIT: usize = 500;
 
+/// What the app knows about the original disc image.
+enum IsoState {
+    /// No ISO was ever selected.
+    Missing,
+    /// An ISO position is remembered; `present` tells whether the
+    /// file is still there.
+    Selected { path: PathBuf, present: bool },
+}
+
 /// Case-insensitive substring match of `name` against the lowercased
 /// filter text `needle`. An empty filter matches everything.
 fn matches_filter(name: &str, needle: &str) -> bool {
@@ -647,20 +973,17 @@ fn matches_filter(name: &str, needle: &str) -> bool {
 
 /// Display label for a staff job code. Only the codes verified on
 /// known records are labelled; the rest stay generic staff.
-fn role_label(job: u8) -> &'static str {
-    match job {
-        11 => "Player",
-        5 => "Manager",
-        _ => "Staff",
-    }
+fn role_label(job: u8) -> String {
+    crate::i18n::t(match job {
+        11 => "role-player",
+        5 => "role-manager",
+        _ => "role-staff",
+    })
 }
 
-/// Apply the classic CM-inspired dark theme with green `#1e5631` panels.
+/// Apply the application theme (see `theme`).
 fn apply_theme(ctx: &egui::Context) {
-    let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = egui::Color32::from_rgb(0x1e, 0x56, 0x31);
-    visuals.window_fill = egui::Color32::from_rgb(0x1e, 0x56, 0x31);
-    ctx.set_visuals(visuals);
+    crate::theme::apply(ctx);
 }
 
 /// Directory holding the imported database, extracted files and the
@@ -669,7 +992,9 @@ fn data_dir() -> Result<PathBuf, String> {
     let base = if cfg!(target_os = "macos") {
         home_dir()?.join("Library").join("Application Support")
     } else if cfg!(target_os = "windows") {
-        PathBuf::from(std::env::var("APPDATA").map_err(|_| "APPDATA is not set".to_string())?)
+        PathBuf::from(
+            std::env::var("APPDATA").map_err(|_| crate::i18n::t("app-appdata-unset"))?,
+        )
     } else {
         match std::env::var("XDG_DATA_HOME") {
             Ok(value) if !value.is_empty() => PathBuf::from(value),
@@ -718,11 +1043,38 @@ fn clear_session() {
     }
 }
 
+/// Location of the saved game-data-dir file.
+fn game_data_dir_path() -> Result<PathBuf, String> {
+    Ok(data_dir()?.join("game-data-dir.txt"))
+}
+
+/// Read the saved game data dir, if any.
+fn read_game_data_dir() -> Option<PathBuf> {
+    let path = game_data_dir_path().ok()?;
+    let text = std::fs::read_to_string(path).ok()?;
+    let line = text.lines().next()?.trim();
+    if line.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(line))
+    }
+}
+
+/// Save the game data dir for the next launch.
+fn save_game_data_dir(dir: &std::path::Path) {
+    if let Ok(path) = game_data_dir_path() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, format!("{}\n", dir.display()));
+    }
+}
+
 /// The current user's home directory.
 fn home_dir() -> Result<PathBuf, String> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
-        .ok_or_else(|| "HOME is not set".to_string())
+        .ok_or_else(|| crate::i18n::t("app-home-unset"))
 }
 
 #[cfg(test)]

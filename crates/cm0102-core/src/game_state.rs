@@ -4,9 +4,23 @@
 //! Top-level mutable game state owned by the application.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::calendar::GameDate;
 use crate::data::Manager;
+use crate::news::{NewsCategory, NewsItem};
+use crate::schedule::Schedule;
+use crate::tactics::TeamTactics;
+use crate::traits::MatchResult;
+
+/// Matches banned after a second yellow (provisional).
+pub const SECOND_YELLOW_BAN: u32 = 1;
+/// Matches banned after a straight red (provisional).
+pub const STRAIGHT_RED_BAN: u32 = 3;
+/// Season yellows triggering a ban (provisional).
+pub const YELLOWS_FOR_BAN: u8 = 5;
+/// Matches banned on reaching the yellow threshold (provisional).
+pub const YELLOW_COUNT_BAN: u32 = 1;
 
 /// The whole simulated world at a point in time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,6 +31,31 @@ pub struct GameState {
     pub managed_club_id: Option<u32>,
     /// Human player's manager, once a career has started.
     pub manager: Option<Manager>,
+    /// This season's fixture list. Defaults to empty so careers saved
+    /// before calendars existed still load; the next Continue
+    /// regenerates the calendar through the season rollover.
+    #[serde(default)]
+    pub schedule: Schedule,
+    /// Managed club's tactics: lineup plus instructions. Defaults to
+    /// an empty 4-4-2 so older saves still load; the UI auto-picks a
+    /// lineup from the squad when none is stored.
+    #[serde(default)]
+    pub tactics: TeamTactics,
+    /// Matches remaining banned, by player id.
+    #[serde(default)]
+    pub suspensions: HashMap<u32, u32>,
+    /// Date the player is fit again, by player id.
+    #[serde(default)]
+    pub injuries: HashMap<u32, GameDate>,
+    /// Season yellow-card counts, by player id.
+    #[serde(default)]
+    pub yellow_counts: HashMap<u32, u8>,
+    /// Manager inbox, oldest first. Empty in older saves.
+    #[serde(default)]
+    pub news: Vec<NewsItem>,
+    /// Next inbox id to hand out.
+    #[serde(default)]
+    pub next_news_id: u64,
 }
 
 impl GameState {
@@ -26,7 +65,125 @@ impl GameState {
             current_date: GameDate::SEASON_START,
             managed_club_id: None,
             manager: None,
+            schedule: Schedule::default(),
+            tactics: TeamTactics::default(),
+            suspensions: HashMap::new(),
+            injuries: HashMap::new(),
+            yellow_counts: HashMap::new(),
+            news: Vec::new(),
+            next_news_id: 1,
         }
+    }
+
+    /// Push an inbox item dated today, returning its id.
+    pub fn push_news(
+        &mut self,
+        category: NewsCategory,
+        headline: String,
+        body: String,
+    ) -> u64 {
+        let id = self.next_news_id;
+        self.next_news_id += 1;
+        self.news.push(NewsItem {
+            id,
+            date: self.current_date,
+            category,
+            headline,
+            body,
+            read: false,
+        });
+        id
+    }
+
+    /// Unread items dated today: fresh news Continue stops for.
+    pub fn fresh_news(&self) -> Vec<&NewsItem> {
+        self.news
+            .iter()
+            .filter(|item| !item.read && item.date == self.current_date)
+            .collect()
+    }
+
+    /// Mark one item read. Returns false for unknown ids.
+    pub fn mark_news_read(&mut self, id: u64) -> bool {
+        if let Some(item) = self.news.iter_mut().find(|item| item.id == id) {
+            item.read = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Mark every item up to today read.
+    pub fn mark_news_read_through_today(&mut self) {
+        let today = self.current_date;
+        for item in &mut self.news {
+            if item.date <= today {
+                item.read = true;
+            }
+        }
+    }
+
+    /// True when the player may play today: not banned and fit.
+    pub fn is_available(&self, player_id: u32) -> bool {
+        if self.suspensions.get(&player_id).is_some_and(|left| *left > 0) {
+            return false;
+        }
+        self.injuries
+            .get(&player_id)
+            .map_or(true, |fit| self.current_date >= *fit)
+    }
+
+    /// Apply a match report to season discipline: bans from reds,
+    /// yellow accumulation, and injury layoffs from today.
+    pub fn apply_match_report(&mut self, report: &MatchResult) {
+        for rating in &report.ratings {
+            if rating.red {
+                let matches = if rating.yellow {
+                    SECOND_YELLOW_BAN
+                } else {
+                    STRAIGHT_RED_BAN
+                };
+                self.suspensions.insert(rating.player_id, matches);
+            } else if rating.yellow {
+                let count = self
+                    .yellow_counts
+                    .get(&rating.player_id)
+                    .copied()
+                    .unwrap_or(0)
+                    + 1;
+                if count >= YELLOWS_FOR_BAN {
+                    self.suspensions.insert(rating.player_id, YELLOW_COUNT_BAN);
+                    self.yellow_counts.remove(&rating.player_id);
+                } else {
+                    self.yellow_counts.insert(rating.player_id, count);
+                }
+            }
+        }
+        for injury in &report.injuries {
+            let fit = self.current_date.add_days(injury.days_out);
+            self.injuries
+                .entry(injury.player_id)
+                .and_modify(|date| *date = (*date).max(fit))
+                .or_insert(fit);
+        }
+    }
+
+    /// Serve one suspension match for the listed players, dropping
+    /// bans that reach zero.
+    pub fn serve_suspension_match(&mut self, player_ids: &[u32]) {
+        for id in player_ids {
+            if let Some(left) = self.suspensions.get_mut(id) {
+                *left = left.saturating_sub(1);
+                if *left == 0 {
+                    self.suspensions.remove(id);
+                }
+            }
+        }
+    }
+
+    /// Reset season yellow counts for a new season. Bans carry over.
+    pub fn reset_season_cards(&mut self) {
+        self.yellow_counts.clear();
     }
 
     /// Start a career: the manager takes charge of `club_id` on the
@@ -136,5 +293,150 @@ mod tests {
             restored.state.manager.expect("manager").full_name(),
             "Arrigo Sacchi"
         );
+    }
+
+    /// Reports ban reds, accumulate yellows and sideline injuries.
+    #[test]
+    fn match_reports_drive_discipline() {
+        use crate::traits::{MatchInjury, MatchStats, PlayerRating};
+        let mut state = GameState::new_season();
+        let report = MatchResult {
+            home_goals: 1,
+            away_goals: 0,
+            events: Vec::new(),
+            stats: MatchStats::default(),
+            ratings: vec![
+                PlayerRating {
+                    player_id: 1,
+                    name: "Sent Off".to_string(),
+                    home: true,
+                    rating: 55,
+                    minutes: 60,
+                    on_minute: 0,
+                    goals: 0,
+                    yellow: false,
+                    red: true,
+                    shots: 0,
+                    on_target: 0,
+                    tackles: 0,
+                    passes: 0,
+                    headers: 0,
+                    interceptions: 0,
+                    offsides: 0,
+                },
+                PlayerRating {
+                    player_id: 2,
+                    name: "Booked".to_string(),
+                    home: true,
+                    rating: 68,
+                    minutes: 90,
+                    on_minute: 0,
+                    goals: 0,
+                    yellow: true,
+                    red: false,
+                    shots: 0,
+                    on_target: 0,
+                    tackles: 0,
+                    passes: 0,
+                    headers: 0,
+                    interceptions: 0,
+                    offsides: 0,
+                },
+            ],
+            shootout: None,
+            injuries: vec![MatchInjury {
+                player_id: 3,
+                name: "Crocked".to_string(),
+                home: true,
+                days_out: 7,
+            }],
+            first_half_end: 45,
+                timeline: Vec::new(),
+            weather: crate::MatchWeather::default(),
+            referee: None,
+            attendance: None,
+        };
+        state.apply_match_report(&report);
+        assert_eq!(state.suspensions.get(&1), Some(&STRAIGHT_RED_BAN));
+        assert_eq!(state.yellow_counts.get(&2), Some(&1));
+        assert!(!state.is_available(1));
+        assert!(state.is_available(2));
+        assert!(!state.is_available(3));
+        assert_eq!(
+            state.injuries.get(&3),
+            Some(&GameDate::new(2001, 7, 8))
+        );
+        state.serve_suspension_match(&[1, 2]);
+        assert_eq!(state.suspensions.get(&1), Some(&(STRAIGHT_RED_BAN - 1)));
+    }
+
+    /// Five yellows earn a ban and reset the count.
+    #[test]
+    fn yellow_accumulation_bans() {
+        use crate::traits::{MatchStats, PlayerRating};
+        let mut state = GameState::new_season();
+        for _ in 0..YELLOWS_FOR_BAN {
+            state.apply_match_report(&MatchResult {
+                home_goals: 0,
+                away_goals: 0,
+                events: Vec::new(),
+                stats: MatchStats::default(),
+                ratings: vec![PlayerRating {
+                    player_id: 9,
+                    name: "Dirty".to_string(),
+                    home: true,
+                    rating: 65,
+                    minutes: 90,
+                    on_minute: 0,
+                    goals: 0,
+                    yellow: true,
+                    red: false,
+                    shots: 0,
+                    on_target: 0,
+                    tackles: 0,
+                    passes: 0,
+                    headers: 0,
+                    interceptions: 0,
+                    offsides: 0,
+                }],
+                shootout: None,
+                injuries: Vec::new(),
+                first_half_end: 45,
+                timeline: Vec::new(),
+                weather: crate::MatchWeather::default(),
+                referee: None,
+                attendance: None,
+            });
+        }
+        assert_eq!(state.suspensions.get(&9), Some(&YELLOW_COUNT_BAN));
+        assert!(!state.yellow_counts.contains_key(&9));
+    }
+
+    /// Saves written before calendars existed load with an empty
+    /// schedule, which the season rollover regenerates.
+    #[test]
+    fn old_saves_load_without_schedule() {
+        let json = r#"{"version":1,"state":{"current_date":{"year":2001,"month":7,"day":1},"managed_club_id":676,"manager":{"first_name":"Arrigo","second_name":"Sacchi","nation_id":1}}}"#;
+        let restored: SavedCareer = serde_json::from_str(json).expect("deserializable");
+        assert!(restored.state.schedule.fixtures.is_empty());
+        assert_eq!(restored.state.managed_club_id, Some(676));
+    }
+
+    /// Inbox ids ascend; fresh means unread and dated today.
+    #[test]
+    fn news_feed_tracks_fresh_items() {
+        use crate::news::NewsCategory;
+        let mut state = GameState::new_season();
+        let first = state.push_news(NewsCategory::Board, "a".to_string(), "b".to_string());
+        let second = state.push_news(NewsCategory::Board, "c".to_string(), "d".to_string());
+        assert!(second > first);
+        assert_eq!(state.fresh_news().len(), 2);
+        assert!(state.mark_news_read(first));
+        assert!(!state.mark_news_read(999));
+        assert_eq!(state.fresh_news().len(), 1);
+        state.advance_day();
+        assert!(state.fresh_news().is_empty());
+        state.mark_news_read_through_today();
+        assert!(state.news.iter().all(|item| item.read));
     }
 }

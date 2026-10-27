@@ -14,6 +14,13 @@ pub struct Club {
     pub id: u32,
     /// Display name, e.g. `Arsenal`.
     pub name: String,
+    /// Current-season league slot: `club.dat` byte 87, equal to the
+    /// `club_comp.dat` id for real leagues. `None` when the imported
+    /// database predates league membership (re-import to populate).
+    /// Bucket values (see `schedule::NON_LEAGUE_SLOTS`) mean the club
+    /// plays in no simulated league.
+    #[serde(default)]
+    pub league_id: Option<u32>,
 }
 
 /// A nation known to the engine (manager nationality, club origin).
@@ -23,6 +30,24 @@ pub struct Nation {
     pub id: u32,
     /// Display name, e.g. `Italy`.
     pub name: String,
+}
+
+/// A match official (referee) from the source data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Official {
+    /// Stable identifier from the source data.
+    pub id: u32,
+    /// Display name, e.g. `Pierluigi Collina`.
+    pub name: String,
+    /// Nation id, when national in scope.
+    pub nation_id: Option<u32>,
+    /// Strictness 0-20. Missing in databases imported before the
+    /// field was read.
+    #[serde(default)]
+    pub strictness: Option<u8>,
+    /// Reputation, weighting match assignment.
+    #[serde(default)]
+    pub reputation: Option<i16>,
 }
 
 /// The human player's manager in a career.
@@ -143,6 +168,58 @@ pub const ATTRIBUTE_NAMES: [&str; 54] = [
     "Vision",
     "Work Rate",
 ];
+
+/// Tackling position inside [`ATTRIBUTE_NAMES`].
+pub const ATTR_TACKLING: usize = 46;
+/// Marking position inside [`ATTRIBUTE_NAMES`].
+pub const ATTR_MARKING: usize = 35;
+
+/// Positions of widely used attributes inside [`ATTRIBUTE_NAMES`].
+pub const ATTR_GOALKEEPER: usize = 0;
+/// Sweeper positional rating.
+pub const ATTR_SWEEPER: usize = 1;
+/// Defender positional rating.
+pub const ATTR_DEFENDER: usize = 2;
+/// Defensive midfielder positional rating.
+pub const ATTR_DM: usize = 3;
+/// Attacker positional rating.
+pub const ATTR_ATTACKER: usize = 6;
+/// Aggression.
+pub const ATTR_AGGRESSION: usize = 13;
+/// Anticipation.
+pub const ATTR_ANTICIPATION: usize = 15;
+/// Decisions.
+pub const ATTR_DECISIONS: usize = 21;
+/// Dirtiness.
+pub const ATTR_DIRTINESS: usize = 22;
+/// Dribbling.
+pub const ATTR_DRIBBLING: usize = 23;
+/// Finishing.
+pub const ATTR_FINISHING: usize = 24;
+/// Handling (goalkeeper).
+pub const ATTR_HANDLING: usize = 27;
+/// Heading.
+pub const ATTR_HEADING: usize = 28;
+/// Injury proneness.
+pub const ATTR_INJURY_PRONENESS: usize = 30;
+/// Jumping.
+pub const ATTR_JUMPING: usize = 31;
+/// Long shots.
+pub const ATTR_LONG_SHOTS: usize = 34;
+/// One on ones.
+pub const ATTR_ONE_ON_ONES: usize = 38;
+/// Pace.
+pub const ATTR_PACE: usize = 39;
+/// Passing.
+pub const ATTR_PASSING: usize = 40;
+/// Penalties.
+pub const ATTR_PENALTIES: usize = 41;
+/// Positioning.
+pub const ATTR_POSITIONING: usize = 42;
+/// Reflexes (goalkeeper).
+pub const ATTR_REFLEXES: usize = 43;
+/// Technique.
+pub const ATTR_TECHNIQUE: usize = 49;
 
 #[cfg(test)]
 mod tests {

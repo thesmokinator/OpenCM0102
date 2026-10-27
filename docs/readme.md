@@ -17,5 +17,7 @@ from observing the original game, before they are implemented.
 - [season.md](season.md) — season and management research.
 - [players.md](players.md) — players and attributes research.
 - [saves.md](saves.md) — native saves and original-format plans.
+- [versions.md](versions.md) — 3.9.60 data baseline, 3.9.68 behaviour target.
+- [roadmap.md](roadmap.md) — implementation overview and build order.
 
 All docs are MIT-licensed with the project — see [LICENSE](../LICENSE).

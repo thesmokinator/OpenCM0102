@@ -20,14 +20,17 @@ disc (as an ISO image) into SQLite; originals are never modified.
 ## Documentation
 
 Start at [docs/readme.md](docs/readme.md): user guide, architecture,
-data formats, and per-system behaviour specs (competitions, match
-engine, transfers, tactics, season, players, saves).
+data formats, per-system behaviour specs (competitions, match
+engine, transfers, tactics, season, players, saves), target
+[versions](docs/versions.md), and the
+[implementation roadmap](docs/roadmap.md).
 
 ## Status
 
 ISO import, data explorer, database viewer, new-career flow with
-native saves. Game-system rules are being specified in `docs/` before
-implementation; the match engine is a declared placeholder.
+native saves, main-menu shell. Game-system rules are being specified
+in `docs/` before implementation; the match engine is a declared
+placeholder.
 
 ## Build
 

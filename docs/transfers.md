@@ -29,21 +29,68 @@ implemented:
 
 ## Verified so far
 
-- Data facts only: `staff_history.dat` records a loan flag plus
-  appearances and goals per staff/year/club; player records carry a
-  squad number (see [dat-format.md](dat-format.md)). No transfer
-  *rule* is verified yet.
+- Data facts: `staff_history.dat` records a loan flag plus
+  appearances and goals (7,637 of 270,654 rows on loan); player
+  records carry a squad number (see [dat-format.md](dat-format.md)).
+- Scripted setup events live in `player_setup.cfg` as quoted
+  commands naming the person and clubs, e.g. `"FUTURE_TRANSFER"
+  "Steinar" "" "Pedersen" "IFK Göteborg" "IK Start" 01 12 2001
+  0 -1 4` and `"LOAN" "Andrey" "Demkine" "Demkin" "Germinal
+  Beerschot Antwerpen" "KSK Beveren" 01 07 2001 30 06 2002`.
+  The 3.9.60 file holds 36 future transfers and 1,471 loans; the
+  3.9.68 file (02/03 data) drops scripted future transfers and
+  keeps 56 loans. (VERIFIED-DATA, config text)
+
+## Findings
+
+Evidence levels: VERIFIED-DATA (imported bytes) vs STRING-EVIDENCE
+(shipped UI text: proves the feature exists, formulas still need
+playtest or function-level analysis).
+
+- Deadlines are per nation with separate transfer and free-transfer
+  deadlines; post-deadline deals are blocked or cancelled.
+  (STRING-EVIDENCE)
+- Transfer regulations: international windows 1–31 July and
+  15 December–15 January, contract protection 3 years (under 28)
+  or 2 years (28+), maximum 5-year contracts, compensation for
+  unprotected moves. (STRING-EVIDENCE)
+- Offer lifecycle: accept / reject with reasons / negotiate /
+  one-week delay / withdraw; release-clause-value offers cannot be
+  delayed, negotiated or rejected. (STRING-EVIDENCE)
+- Fees: base plus league/international appearance add-ons, percent
+  of next sale and monthly installments; former clubs receive
+  sell-on cuts. (STRING-EVIDENCE)
+- Five release-clause types (manager job, relegation, non-playing,
+  minimum fee, non-promotion) with fixed-fee activation events.
+  (STRING-EVIDENCE)
+- Loans are nation-parameterized: concurrency and seasonal caps,
+  same-competition/division bans, appearance thresholds, recall
+  and send-back locks (some absolute, some date-locked), wage
+  splits. (STRING-EVIDENCE)
+- Work permits: delayed grant-or-refuse, conditional permits,
+  yearly renewal on games played, EU-passport exemption.
+  (STRING-EVIDENCE)
+- Board gates: wage/fee caps, unknown-player restrictions, blocks
+  for small squads, no space/funds or poor finances.
+  (STRING-EVIDENCE)
+- Squad-status ladder gates contract talks; players reject with
+  enumerated reasons; nationality and foreign-player signing bans
+  exist (including club-specific matrices). (STRING-EVIDENCE)
+- Player-club interaction verbs: praise, criticise, warn, promise,
+  unsettle, transfer request, transfer listing, trial offers and
+  approach-to-buy. (STRING-EVIDENCE)
+- AI clubs bid, negotiate and withdraw (toggleable).
+  (STRING-EVIDENCE)
 
 ## Rules surface (editable targets)
 
-Windows and deadlines per nation, permit rules, loan rules, foreign
-limits, squad caps and budget parameters must all become editable
-data files with the 01/02 season as default — see "Rules as data" in
-[architecture.md](architecture.md). The exact file shapes are drawn
-once the rules above are specified.
+Deadlines and windows per nation, loan/permit/fee/clause rules,
+board caps, squad statuses and nationality bans must all become
+editable data files with the 01/02 season as default — see "Rules
+as data" in [architecture.md](architecture.md).
 
 ## Open questions
 
-- Full rule set per item in Coverage, verified by observing the
-  original game (bids at various dates, clauses offered, permit
-  messages, AI activity over a season).
+- Permit formula, AI valuation, tribunal formula, wage/contract
+  storage, Bosman thresholds, installment timing, deadline dates:
+  needs playtest plus function-level analysis.

@@ -9,7 +9,10 @@
 
 use std::path::{Path, PathBuf};
 
-use cm0102_core::{GameDate, Manager, Nation, SavedCareer};
+use cm0102_core::{
+    Formation, GameDate, Manager, Nation, SavedCareer, Schedule, TeamTactics, DEFAULT_LEGS,
+    DEFAULT_ROUND_SPACING, first_round_for_year,
+};
 
 use super::*;
 
@@ -70,6 +73,11 @@ pub struct CareerState {
     saves: Vec<SavedCareerEntry>,
     saves_loaded: bool,
     error: Option<String>,
+    /// File the active career was started from or loaded from, so the
+    /// main-menu shell can re-save without asking again.
+    pub active_save_file: Option<String>,
+    /// Save file with delete confirmation armed (two-click delete).
+    delete_armed: Option<String>,
 }
 
 impl OpenCmApp {
@@ -93,12 +101,15 @@ impl OpenCmApp {
 
     /// New-career wizard screen: dispatch to the current step.
     pub fn show_new_career(&mut self, ui: &mut egui::Ui) {
+        use crate::i18n::{t, tr};
         let (index, total) = self.career.step.position();
+        let index = index.to_string();
+        let total = total.to_string();
         ui.horizontal(|ui| {
-            ui.heading(format!("New career — step {index} of {total}"));
+            ui.heading(tr("career-step", &[("index", &index), ("total", &total)]));
             ui.separator();
-            if ui.button("Cancel").clicked() {
-                self.screen = Screen::DataExplorer;
+            if ui.button(t("action-cancel")).clicked() {
+                self.screen = Screen::SetupWizard;
             }
         });
         ui.separator();
@@ -115,19 +126,20 @@ impl OpenCmApp {
 
     /// Step 1: the manager's first and second name.
     fn show_manager_name_step(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Create manager");
+        use crate::i18n::t;
+        ui.heading(t("career-create-manager"));
         egui::Grid::new("manager_name_grid").show(ui, |ui| {
-            ui.label("First name");
+            ui.label(t("career-first-name"));
             ui.add(
                 egui::TextEdit::singleline(&mut self.career.first_name)
-                    .hint_text("Arrigo")
+                    .hint_text(t("career-first-name-hint"))
                     .desired_width(240.0),
             );
             ui.end_row();
-            ui.label("Second name");
+            ui.label(t("career-second-name"));
             ui.add(
                 egui::TextEdit::singleline(&mut self.career.second_name)
-                    .hint_text("Sacchi")
+                    .hint_text(t("career-second-name-hint"))
                     .desired_width(240.0),
             );
             ui.end_row();
@@ -136,38 +148,40 @@ impl OpenCmApp {
         let ready = !self.career.first_name.trim().is_empty()
             && !self.career.second_name.trim().is_empty();
         if ui
-            .add_enabled(ready, egui::Button::new("Next"))
+            .add_enabled(ready, egui::Button::new(t("action-next")))
             .clicked()
         {
             self.career.step = CareerStep::Nationality;
             self.career.error = None;
         }
         if !ready {
-            ui.label("Enter both a first and a second name to continue.");
+            ui.label(t("career-need-names"));
         }
     }
 
     /// Step 2: the manager's nationality.
     fn show_nationality_step(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Select nationality");
+        use crate::i18n::{t, tr};
+        ui.heading(t("career-select-nationality"));
         if self.career.nations.is_empty() {
-            ui.label("No nations imported yet.");
+            ui.label(t("career-no-nations"));
             return;
         }
         if ui
             .add(
                 egui::TextEdit::singleline(&mut self.career.nation_filter)
-                    .hint_text("Filter nations…")
+                    .hint_text(t("filter-nations"))
                     .desired_width(240.0),
             )
             .changed()
         {
             self.refresh_nation_filter();
         }
-        ui.label(format!(
-            "{} of {} nations",
-            self.career.filtered_nations.len(),
-            self.career.nations.len()
+        let shown = self.career.filtered_nations.len().to_string();
+        let total = self.career.nations.len().to_string();
+        ui.label(tr(
+            "career-nations-count",
+            &[("shown", &shown), ("total", &total)],
         ));
         egui::ScrollArea::vertical().show(ui, |ui| {
             for nation in self.career.filtered_nations.clone() {
@@ -180,13 +194,13 @@ impl OpenCmApp {
         });
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if ui.button("Back").clicked() {
+            if ui.button(t("action-back")).clicked() {
                 self.career.step = CareerStep::ManagerName;
                 self.career.error = None;
             }
             let ready = self.career.selected_nation_id.is_some();
             if ui
-                .add_enabled(ready, egui::Button::new("Next"))
+                .add_enabled(ready, egui::Button::new(t("action-next")))
                 .clicked()
             {
                 self.career.step = CareerStep::Club;
@@ -197,26 +211,25 @@ impl OpenCmApp {
 
     /// Step 3: the club to manage.
     fn show_club_step(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Select club");
+        use crate::i18n::{t, tr};
+        ui.heading(t("career-select-club"));
         if self.clubs.is_empty() {
-            ui.label("No clubs imported yet.");
+            ui.label(t("explorer-no-clubs"));
             return;
         }
         if ui
             .add(
                 egui::TextEdit::singleline(&mut self.career.club_filter)
-                    .hint_text("Filter clubs…")
+                    .hint_text(t("filter-clubs"))
                     .desired_width(240.0),
             )
             .changed()
         {
             self.refresh_career_club_filter();
         }
-        ui.label(format!(
-            "{} of {} clubs",
-            self.career.filtered_clubs.len(),
-            self.clubs.len()
-        ));
+        let shown = self.career.filtered_clubs.len().to_string();
+        let total = self.clubs.len().to_string();
+        ui.label(tr("clubs-count", &[("shown", &shown), ("total", &total)]));
         egui::ScrollArea::vertical().show(ui, |ui| {
             for club in self.career.filtered_clubs.iter().take(RENDER_LIMIT).cloned() {
                 let selected = self.career.selected_club_id == Some(club.id);
@@ -226,20 +239,19 @@ impl OpenCmApp {
                 }
             }
             if self.career.filtered_clubs.len() > RENDER_LIMIT {
-                ui.label(format!(
-                    "…showing the first {RENDER_LIMIT}; refine the filter."
-                ));
+                let limit = RENDER_LIMIT.to_string();
+                ui.label(tr("refine-filter", &[("limit", &limit)]));
             }
         });
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if ui.button("Back").clicked() {
+            if ui.button(t("action-back")).clicked() {
                 self.career.step = CareerStep::Nationality;
                 self.career.error = None;
             }
             let ready = self.career.selected_club_id.is_some();
             if ui
-                .add_enabled(ready, egui::Button::new("Next"))
+                .add_enabled(ready, egui::Button::new(t("action-next")))
                 .clicked()
             {
                 if self.career.save_name.trim().is_empty() {
@@ -253,7 +265,8 @@ impl OpenCmApp {
 
     /// Step 4: review the choices, name the save, start the career.
     fn show_save_step(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Save and start");
+        use crate::i18n::t;
+        ui.heading(t("career-save-and-start"));
         let manager_name = format!(
             "{} {}",
             self.career.first_name.trim(),
@@ -262,34 +275,34 @@ impl OpenCmApp {
         let nation_name = self.selected_nation_name();
         let club_name = self.selected_career_club_name();
         egui::Grid::new("career_summary_grid").show(ui, |ui| {
-            ui.strong("Manager");
+            ui.strong(t("career-manager-label"));
             ui.label(&manager_name);
             ui.end_row();
-            ui.strong("Nationality");
+            ui.strong(t("career-nationality-label"));
             ui.label(&nation_name);
             ui.end_row();
-            ui.strong("Club");
+            ui.strong(t("career-club-label"));
             ui.label(&club_name);
             ui.end_row();
         });
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            ui.label("Save name");
+            ui.label(t("career-save-name"));
             ui.add(
                 egui::TextEdit::singleline(&mut self.career.save_name)
-                    .hint_text("My career")
+                    .hint_text(t("career-save-name-hint"))
                     .desired_width(240.0),
             );
         });
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if ui.button("Back").clicked() {
+            if ui.button(t("action-back")).clicked() {
                 self.career.step = CareerStep::Club;
                 self.career.error = None;
             }
             let ready = !self.career.save_name.trim().is_empty();
             if ui
-                .add_enabled(ready, egui::Button::new("Save & start career"))
+                .add_enabled(ready, egui::Button::new(t("career-save-and-start-button")))
                 .clicked()
             {
                 self.finish_career_start();
@@ -299,13 +312,14 @@ impl OpenCmApp {
 
     /// Load-career screen: every native save with a one-line summary.
     pub fn show_load_career(&mut self, ui: &mut egui::Ui) {
+        use crate::i18n::t;
         ui.horizontal(|ui| {
-            ui.heading("Load career");
+            ui.heading(t("screen-load-career"));
             ui.separator();
-            if ui.button("Back to explorer").clicked() {
-                self.screen = Screen::DataExplorer;
+            if ui.button(t("career-back-to-setup")).clicked() {
+                self.screen = Screen::SetupWizard;
             }
-            if ui.button("Refresh").clicked() {
+            if ui.button(t("action-refresh")).clicked() {
                 self.career.saves_loaded = false;
             }
         });
@@ -318,15 +332,16 @@ impl OpenCmApp {
             self.career.saves_loaded = true;
         }
         if self.career.saves.is_empty() {
-            ui.label("No saved careers yet. Start a new career first.");
+            ui.label(t("career-no-saves"));
             return;
         }
         egui::ScrollArea::vertical().show(ui, |ui| {
             egui::Grid::new("load_career_grid").striped(true).show(ui, |ui| {
-                ui.strong("Save");
-                ui.strong("Manager");
-                ui.strong("Club");
-                ui.strong("Date");
+                ui.strong(t("career-th-save"));
+                ui.strong(t("career-th-manager"));
+                ui.strong(t("career-th-club"));
+                ui.strong(t("career-th-date"));
+                ui.strong("");
                 ui.strong("");
                 ui.end_row();
                 for entry in self.career.saves.clone() {
@@ -334,8 +349,23 @@ impl OpenCmApp {
                     ui.label(&entry.manager_name);
                     ui.label(&entry.club_name);
                     ui.label(entry.date.to_string());
-                    if ui.button("Load").clicked() {
+                    if ui.button(t("action-load")).clicked() {
                         self.load_career_file(&entry.file_name);
+                    }
+                    let armed = self.career.delete_armed.as_deref() == Some(&entry.file_name);
+                    if ui
+                        .button(if armed {
+                            t("action-delete-confirm")
+                        } else {
+                            t("action-delete")
+                        })
+                        .clicked()
+                    {
+                        if armed {
+                            self.delete_career_file(&entry.file_name);
+                        } else {
+                            self.career.delete_armed = Some(entry.file_name.clone());
+                        }
                     }
                     ui.end_row();
                 }
@@ -372,7 +402,7 @@ impl OpenCmApp {
             .selected_nation_id
             .and_then(|id| self.career.nations.iter().find(|nation| nation.id == id))
             .map(|nation| nation.name.clone())
-            .unwrap_or_else(|| "—".to_string())
+            .unwrap_or_else(|| crate::i18n::t("missing-value"))
     }
 
     /// Display name of the selected club, or `—` when none.
@@ -381,7 +411,7 @@ impl OpenCmApp {
             .selected_club_id
             .and_then(|id| self.clubs.iter().find(|club| club.id == id))
             .map(|club| club.name.clone())
-            .unwrap_or_else(|| "—".to_string())
+            .unwrap_or_else(|| crate::i18n::t("missing-value"))
     }
 
     /// Suggested save name from the manager and club choices.
@@ -399,7 +429,7 @@ impl OpenCmApp {
         let (Some(nation_id), Some(club_id)) =
             (self.career.selected_nation_id, self.career.selected_club_id)
         else {
-            self.career.error = Some("Pick a nationality and a club first.".to_string());
+            self.career.error = Some(crate::i18n::t("career-pick-first"));
             return;
         };
         let manager = Manager {
@@ -409,6 +439,28 @@ impl OpenCmApp {
         };
         let mut state = self.state.clone();
         state.start_career(manager.clone(), club_id);
+        if let Some(managed) = self.clubs.iter().find(|club| club.id == club_id) {
+            if managed.league_id.is_none() {
+                let club = managed.name.clone();
+                self.career.error = Some(crate::i18n::tr(
+                    "career-no-league-data",
+                    &[("club", &club)],
+                ));
+                return;
+            }
+            state.schedule = Schedule::for_club_league(
+                managed,
+                &self.clubs,
+                first_round_for_year(state.current_date.year),
+                DEFAULT_ROUND_SPACING,
+                DEFAULT_LEGS,
+            );
+        }
+        if let Some(provider) = &self.provider {
+            if let Ok(squad) = provider.get_players_by_club(club_id) {
+                state.tactics = TeamTactics::auto(Formation::default(), &squad);
+            }
+        }
         let file_name = format!("{}.json", sanitize_save_name(&self.career.save_name));
         let path = match saves_dir() {
             Ok(dir) => dir.join(&file_name),
@@ -425,12 +477,43 @@ impl OpenCmApp {
         self.selected_club_id = Some(club_id);
         self.refresh_squad();
         self.selected_player = None;
-        self.screen = Screen::DataExplorer;
-        self.status = format!(
-            "Career started: {} manages {}. Saved as {file_name}.",
-            manager.full_name(),
-            self.selected_career_club_name()
+        self.screen = Screen::Game;
+        self.career.active_save_file = Some(file_name.clone());
+        let manager_name = manager.full_name();
+        let club_name = self.selected_career_club_name();
+        self.status = crate::i18n::tr(
+            "career-started",
+            &[
+                ("manager", &manager_name),
+                ("club", &club_name),
+                ("file", &file_name),
+            ],
         );
+    }
+
+    /// Delete a save file after two-click confirmation.
+    fn delete_career_file(&mut self, file_name: &str) {
+        self.career.delete_armed = None;
+        if !is_plain_file_name(file_name) {
+            self.career.error = Some(crate::i18n::t("career-refuse-unsafe-delete"));
+            return;
+        }
+        let path = match saves_dir() {
+            Ok(dir) => dir.join(file_name),
+            Err(error) => {
+                self.career.error = Some(error);
+                return;
+            }
+        };
+        if let Err(error) = std::fs::remove_file(&path) {
+            let error = error.to_string();
+            self.career.error = Some(crate::i18n::tr("career-cannot-delete", &[("error", &error)]));
+            return;
+        }
+        if self.career.active_save_file.as_deref() == Some(file_name) {
+            self.career.active_save_file = None;
+        }
+        self.career.saves_loaded = false;
     }
 
     /// Rescan the saves directory for loadable native careers.
@@ -448,7 +531,9 @@ impl OpenCmApp {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
             Err(error) => {
-                self.career.error = Some(format!("cannot list saves: {error}"));
+                let error = error.to_string();
+                self.career.error =
+                    Some(crate::i18n::tr("career-cannot-list", &[("error", &error)]));
                 return;
             }
         };
@@ -470,16 +555,19 @@ impl OpenCmApp {
                         .manager
                         .as_ref()
                         .map(Manager::full_name)
-                        .unwrap_or_else(|| "—".to_string()),
+                        .unwrap_or_else(|| crate::i18n::t("missing-value")),
                     club_name: saved
                         .state
                         .managed_club_id
                         .map(|id| self.club_name_or_id(id))
-                        .unwrap_or_else(|| "—".to_string()),
+                        .unwrap_or_else(|| crate::i18n::t("missing-value")),
                     date: saved.state.current_date,
                 }),
                 Err(error) => {
-                    self.career.error = Some(format!("{file_name}: {error}"));
+                    self.career.error = Some(crate::i18n::tr(
+                        "career-load-error",
+                        &[("file", &file_name), ("error", &error)],
+                    ));
                 }
             }
         }
@@ -502,17 +590,24 @@ impl OpenCmApp {
                 self.selected_club_id = self.state.managed_club_id;
                 self.refresh_squad();
                 self.selected_player = None;
-                self.screen = Screen::DataExplorer;
+                self.screen = Screen::Game;
+                self.career.active_save_file = Some(file_name.to_string());
                 let manager = self
                     .state
                     .manager
                     .as_ref()
                     .map(Manager::full_name)
-                    .unwrap_or_else(|| "—".to_string());
-                self.status = format!("Loaded {file_name}: {manager}.");
+                    .unwrap_or_else(|| crate::i18n::t("missing-value"));
+                self.status = crate::i18n::tr(
+                    "career-loaded",
+                    &[("file", file_name), ("manager", &manager)],
+                );
             }
             Err(error) => {
-                self.career.error = Some(format!("{file_name}: {error}"));
+                self.career.error = Some(crate::i18n::tr(
+                    "career-load-error",
+                    &[("file", file_name), ("error", &error)],
+                ));
             }
         }
     }
@@ -528,16 +623,29 @@ impl OpenCmApp {
             .iter()
             .find(|club| club.id == club_id)
             .map(|club| club.name.clone())
-            .unwrap_or_else(|| format!("Club {club_id}"))
+            .unwrap_or_else(|| {
+                let id = club_id.to_string();
+                crate::i18n::tr("career-unknown-club", &[("id", &id)])
+            })
     }
 }
 
 /// Directory holding native career saves inside the user data directory.
-fn saves_dir() -> Result<PathBuf, String> {
+pub(super) fn saves_dir() -> Result<PathBuf, String> {
     Ok(data_dir()?.join("saves"))
 }
 
 /// File-system-safe stem for a user-supplied save name.
+/// True when `name` is a bare file name with no parent or separator,
+/// so joining it under the saves directory cannot escape it.
+fn is_plain_file_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains(['/', '\\'])
+        && name != "."
+        && name != ".."
+        && !name.contains("..")
+}
+
 fn sanitize_save_name(name: &str) -> String {
     let mut cleaned: String = name
         .trim()
@@ -559,26 +667,39 @@ fn sanitize_save_name(name: &str) -> String {
 }
 
 /// Write a native career save to `path`, creating parent directories.
-fn save_career_to(path: &Path, saved: &SavedCareer) -> Result<(), String> {
+pub(super) fn save_career_to(path: &Path, saved: &SavedCareer) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("cannot create saves directory: {error}"))?;
+        std::fs::create_dir_all(parent).map_err(|error| {
+            let error = error.to_string();
+            crate::i18n::tr("career-cannot-create-saves-dir", &[("error", &error)])
+        })?;
     }
-    let json =
-        serde_json::to_string_pretty(saved).map_err(|error| format!("cannot encode save: {error}"))?;
-    std::fs::write(path, json).map_err(|error| format!("cannot write save: {error}"))
+    let json = serde_json::to_string_pretty(saved).map_err(|error| {
+        let error = error.to_string();
+        crate::i18n::tr("career-cannot-encode", &[("error", &error)])
+    })?;
+    std::fs::write(path, json).map_err(|error| {
+        let error = error.to_string();
+        crate::i18n::tr("career-cannot-write", &[("error", &error)])
+    })
 }
 
 /// Read a native career save, rejecting unknown envelope versions.
 fn load_career_from(path: &Path) -> Result<SavedCareer, String> {
-    let text = std::fs::read_to_string(path).map_err(|error| format!("cannot read save: {error}"))?;
-    let saved: SavedCareer =
-        serde_json::from_str(&text).map_err(|error| format!("cannot decode save: {error}"))?;
+    let text = std::fs::read_to_string(path).map_err(|error| {
+        let error = error.to_string();
+        crate::i18n::tr("career-cannot-read", &[("error", &error)])
+    })?;
+    let saved: SavedCareer = serde_json::from_str(&text).map_err(|error| {
+        let error = error.to_string();
+        crate::i18n::tr("career-cannot-decode", &[("error", &error)])
+    })?;
     if saved.version != SavedCareer::CURRENT_VERSION {
-        return Err(format!(
-            "unsupported save version {} (this build reads version {})",
-            saved.version,
-            SavedCareer::CURRENT_VERSION
+        let found = saved.version.to_string();
+        let wanted = SavedCareer::CURRENT_VERSION.to_string();
+        return Err(crate::i18n::tr(
+            "career-unsupported-version",
+            &[("found", &found), ("wanted", &wanted)],
         ));
     }
     Ok(saved)
@@ -600,6 +721,15 @@ mod tests {
         assert_eq!(sanitize_save_name("../evil.sav"), "evil_sav");
         assert_eq!(sanitize_save_name("  "), "career");
         assert_eq!(sanitize_save_name("a/b\\c:d"), "a_b_c_d");
+    }
+
+    #[test]
+    fn plain_file_name_rejects_escapes() {
+        assert!(is_plain_file_name("Sacchi - Arsenal.json"));
+        assert!(!is_plain_file_name(""));
+        assert!(!is_plain_file_name("../evil.json"));
+        assert!(!is_plain_file_name("sub/dir.json"));
+        assert!(!is_plain_file_name(".."));
     }
 
     /// A career written to disk reads back with manager and club intact.

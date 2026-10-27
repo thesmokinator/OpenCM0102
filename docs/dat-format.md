@@ -9,22 +9,13 @@ observation is recorded here with the file name, offset and sample values.
 
 ## Rules
 
-- Observations come from the user's own freeware data, inspected locally.
+- Observations come from the user's own ISO, inspected locally.
   No original file is ever committed to this repository; tests use small
   synthetic fixtures built from the layouts written here.
 - A `.dat` parser may be added under `crates/cm0102-db/src/formats/` only
   for layouts documented in this file. Guessed layouts do not ship.
 
-## Known so far (from idea.md, to be confirmed on real data)
-
-- A full data set ships about twenty `.dat` files; the setup wizard counts
-  them and warns on a mismatch (`EXPECTED_DAT_FILE_COUNT`).
-- Target SQLite schema for players:
-  `players(id, first_name, second_name, club_id, current_ability,
-  potential_ability)` — abilities stay `NULL` until their offsets here are
-  confirmed.
-
-## Observed on the real freeware ISO (23 Oct 2026)
+## Observed on the real ISO (23 Oct 2026)
 
 - The image is an **installer disc** (ISO 9660 + Joliet volume `CM0102`).
   Its filesystem holds 44 files, among them only two `.dat` files:
@@ -62,7 +53,8 @@ independently in Rust. Version 5 layout only:
 ## Record layouts (implemented, verified 23 Oct 2026)
 
 Parser: `crates/cm0102-db/src/formats.rs`, derived empirically from the
-real data and cross-checked against known entities.
+real data and cross-checked against known entities. Counts below are
+3.9.60; 3.9.68 deltas have their own section at the end.
 
 - Name files (`first_names.dat`, `second_names.dat`,
   `common_names.dat`): 60-byte records. Name in bytes 0–50 (NUL padded),
@@ -81,8 +73,9 @@ real data and cross-checked against known entities.
   Blackburn/Bolton/Fulham read 87 = 7 / 91 = 8, Manchester
   City/Coventry/Bradford read 87 = 8 / 91 = 7, and Chievo/Piacenza/
   Torino/Venezia read 87 = 24 / 91 = 25. Small clubs carry bucket
-  values (58/98/101/254, …) whose lower-league encoding is still
-  under analysis; 254 behaves as "none". Neighbor bytes 86/90 are
+  values (58/98/101/254, …) or spill under real league ids — full
+  distribution in [competitions.md](competitions.md); the assignment
+  rule is still open. Neighbor bytes 86/90 are
   separate 0/255 `u8` flags, not part of the league field.
 - `staff.dat`, staff section: 157-byte packed records. The section is
   the run of records whose staff id `i32` at byte 0 equals the record
@@ -93,7 +86,8 @@ real data and cross-checked against known entities.
   unattached).
 - Date of birth in the staff record: zero-based day of year `u16` at
   byte 16, year `i16` at byte 18. Verified on Thierry Henry
-  (228/1977 = 17 Aug 1977), Patrick Vieira (173/1976 = 23 Jun 1976),
+  (228/1977 = 17 Aug 1977), Patrick Vieira (173/1976 = 22 Jun 1976;
+  the data is one day off his real 23 Jun birthday),
   Dennis Bergkamp (129/1969 = 10 May 1969), David Seaman
   (261/1963 = 19 Sep 1963) and Tony Adams (282/1966 = 10 Oct 1966).
 - Job code at byte 61: 11 = player (99% of playing records), 5 =
@@ -147,7 +141,8 @@ TransferTool structures and known entities on the real file:
   56, code at 83, continent at 89, nation at 93, reputation at 105.
 - `staff_comp.dat`: 101-byte records, 542 staff competitions.
 - `officials.dat`: 43-byte records, 3,124 officials. Name ids at
-  4/8, nation at 22, city at 26, abilities/reputation at 30/32/34.
+  4/8, nation at 22, city at 26, abilities/reputation at 30/32/34,
+  strictness 0-20 at 37 (0 = unset in most filler rows).
 - `club_comp_history.dat` + `nation_comp_history.dat`: 26-byte
   records sharing one id space (7,194 + 143). Competition at 4,
   year at 8, winners/runners-up/third/hosts clubs at 10/14/18/22.
@@ -160,3 +155,54 @@ TransferTool structures and known entities on the real file:
 is an index by-product and the second ships runtime pointers rather
 than data in this version; both remain visible in the imported file
 inventory (`source_files`).
+
+## 3.9.68 data deltas (VERIFIED-DATA, patched bytes)
+
+The patch ships full replacements for the database files below; all
+record sizes are unchanged (verified by exact section accounting,
+e.g. staff sections sum to the byte). Counts 3.9.60 → 3.9.68:
+
+| File | 3.9.60 | 3.9.68 |
+|---|---|---|
+| `club.dat` | 10,580 | 13,214 |
+| `staff.dat` persons | 132,722 | 169,342 |
+| player records | 109,940 | 139,769 |
+| non-player records | 23,785 | 30,865 |
+| `city.dat` | 5,418 | 6,682 |
+| `stadium.dat` | 7,096 | 8,917 |
+| `officials.dat` | 3,124 | 4,567 |
+| `first_names.dat` | 34,363 | 44,281 |
+| `second_names.dat` | 82,338 | 104,395 |
+| `common_names.dat` | 8,493 | 13,256 |
+| `club_comp.dat` | 390 | 433 |
+| `staff_comp.dat` | 542 | 543 |
+| `*.lng` (×10) | 1,621,488 B | 1,993,486 B |
+| `language.ldb` | 34,562,266 B | 204,672,142 B |
+| `club_comp_history.dat` rows | 7,194 | 10,766 |
+| `nation_comp_history.dat` rows | 143 | 273 |
+| `staff_history.dat` rows | 270,654 | 385,846 |
+| `staff_comp_history.dat` rows | 1,998 | 2,609 |
+
+Structural notes:
+
+- Record ids are positional, not stable across data versions: e.g.
+  West Ham United is club 10,224 in 3.9.60 but 12,765 in 3.9.68.
+  Importers must resolve by name, never hardcode ids.
+- Taiwan is renamed to Chinese Taipei and moves from nation slot 183
+  to slot 43; nations 43–182 shift up by one and every nation
+  reference (competitions, cities, staff) is renumbered to match.
+- `club_comp.dat` grows by 43 Asian competitions and repurposes
+  slots 364–389 (Arab cups move to 373–377); see
+  [competitions.md](competitions.md).
+- `nation_comp.dat` is reordered ('B' and Under-21 internationals
+  move to the front) with the same 19 entries.
+- Not shipped by the patch (3.9.60 bytes stay current):
+  `events_*.cfg`, `euro.cfg`, `fancluburls.txt`, `pundit.cfg`,
+  `si.rgn`, `Cpuinf32.dll`, `game.mbr`/`match.mbr` templates
+  (verified byte-identical in the patched install).
+- `language.ldb` grows ~6× (34.5 → 204.6 MB): it is the
+  multilingual text bank (~9,807 templates × 10 languages);
+  record layout still open.
+- Default tactics ship as `Data/*.pct` (one file per formation
+  variant, e.g. `442_default.pct`); format still open — see
+  [tactics.md](tactics.md).
