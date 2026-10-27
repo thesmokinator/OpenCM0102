@@ -141,7 +141,8 @@ TransferTool structures and known entities on the real file:
   56, code at 83, continent at 89, nation at 93, reputation at 105.
 - `staff_comp.dat`: 101-byte records, 542 staff competitions.
 - `officials.dat`: 43-byte records, 3,124 officials. Name ids at
-  4/8, nation at 22, city at 26, abilities/reputation at 30/32/34.
+  4/8, nation at 22, city at 26, abilities/reputation at 30/32/34,
+  strictness 0-20 at 37 (0 = unset in most filler rows).
 - `club_comp_history.dat` + `nation_comp_history.dat`: 26-byte
   records sharing one id space (7,194 + 143). Competition at 4,
   year at 8, winners/runners-up/third/hosts clubs at 10/14/18/22.

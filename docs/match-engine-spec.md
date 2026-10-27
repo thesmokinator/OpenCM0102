@@ -114,9 +114,12 @@ local exe-string inventory.
 - Referees are database entities (`officials`, 3,124 rows) with a
   stats screen and an FA complaint flow. (VERIFIED-DATA +
   STRING-EVIDENCE)
-- Referee strictness shows as a name descriptor — Lenient (values
-  0–5), Strict (15–19), Harsh (20) — with mid values unlabeled.
-  (STRING-EVIDENCE; in-game wording to confirm by playtest.)
+- Referee strictness is `officials.dat` byte 37 (0–20) and shows
+  as a name descriptor — Lenient (0–5), Strict (15–19), Harsh
+  (20) — with mid values unlabeled. Thresholds confirmed in the
+  match-preview builder; most filler rows carry 0 (unset) while
+  rated referees correlate with high reputation. (VERIFIED-DATA +
+  function-level analysis; booking-rate formula still open.)
 - Injuries: 60+ body-part types, database-seeded starting and
   recurring injuries, doubtful/out availability states.
   (STRING-EVIDENCE)
@@ -139,6 +142,7 @@ chance/goal model constants must all become editable data with the
   man-of-the-match selection, and the weights of tactics, morale
   and condition: needs black-box sampling plus function-level
   analysis.
-- Referee strictness, weather/pitch gameplay modifiers, home
-  advantage, AI substitutions, assist definition, ban accounting:
-  needs playthrough observation plus function-level analysis.
+- Booking-rate formula from strictness, weather/pitch gameplay
+  modifiers, home advantage, AI substitutions, assist definition,
+  ban accounting: needs playthrough observation plus
+  function-level analysis.

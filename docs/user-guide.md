@@ -115,9 +115,12 @@ by ability, changeable formation, click-to-swap with reserves;
 suspended and injured players are marked and cannot be picked):
 press Continue to reach the first match day — the next match is
 always shown under the top bar — and the game takes you into the
-match-day screen: pre-match build-up, **Play Match**, then the
+match-day screen: pre-match build-up (venue, weather and pitch,
+referee with his strictness tag), **Play Match**, then the
 live commentary (with speed control and a half-time pause) up to
-the full-time report with stats and ratings. Other due fixtures
+the full-time report with attendance, stats and ratings.
+Frozen or waterlogged pitches can postpone a fixture by a week,
+with a news item telling you. Other due fixtures
 are simulated automatically with a results roundup in your inbox;
 clicking a result row re-opens its match report. The League Table
 section shows the standings from all played results. Fresh news
