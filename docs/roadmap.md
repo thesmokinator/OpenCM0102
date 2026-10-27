@@ -16,13 +16,13 @@ mechanics need playtest or function-level analysis), OPEN.
 |---|---|---|---|
 | Data import | [dat-format.md](dat-format.md) | `cm0102-db` | Done; bucket rule, wage/contract offsets open |
 | Competitions | [competitions.md](competitions.md) | `cm0102-core` competition | Catalog + menu done; bindings open |
-| Match engine | [match-engine-spec.md](match-engine-spec.md) | `cm0102-match` | Placeholder; model open |
+| Match engine | [match-engine-spec.md](match-engine-spec.md) | `cm0102-match` | Playable: stats, commentary, weather, referee, crowd; ratings/tactics-live open |
 | Transfers | [transfers.md](transfers.md) | `cm0102-core` transfers | Flows mapped; formulas open |
 | Tactics | [tactics.md](tactics.md) | `cm0102-core` tactics | Grids mapped; effects open |
-| Season | [season.md](season.md) | `cm0102-core` season sim | Flows mapped; pipeline open |
+| Season | [season.md](season.md) | `cm0102-core` season sim | Event-driven Continue done; board/finance open |
 | Players | [players.md](players.md) | `cm0102-core` data | Layout done; semantics open |
 | Saves | [saves.md](saves.md) | app + `cm0102-core` | Native done; container solved, payload layouts open |
-| App flows | [user-guide.md](user-guide.md) | app screens | Explorer + career done; rest open |
+| App flows | [user-guide.md](user-guide.md) | app screens | Splash, career, match-day shell, theme done; jobs/search/editor open |
 | Versions | [versions.md](versions.md) | all specs | Policy set: 3.9.60 data, 3.9.68 behaviour; playtest diff open |
 
 ## Rules files
@@ -64,7 +64,7 @@ analysis, or both — details in the per-system specs):
 8. Regen/intake dates and generation rules.
 9. Save payload record layouts + 3.9.68 sample (container and
     compression solved on a 3.9.60 save).
-10. New-game screen order and rollover UX.
+10. Rollover spec cross-check (new-game flow and calendar rollover implemented).
 11. Exe-side 3.9.68 fixes (free-kick chance, MoM logic, interest
     severity, selection interplay, West Ham mechanism, ARSE):
     needs playtest observation on the patched game.
@@ -85,10 +85,11 @@ green.
    Coventry/Bradford down) reproduce from the data.
 2. **Faithful match engine v1**
    ([match-engine-spec.md](match-engine-spec.md), `cm0102-match`).
-   Replace the placeholder behind `MatchEngine`: scorer/penalty/
-   own-goal events, cards with scoped suspensions, 17-column
-   stats, weather postponement hook. Done when: deterministic
-   per seed, event strings match the specified catalogue.
+   Scorer/penalty/own-goal events, cards with scoped
+   suspensions, live stat block, cfg commentary, weather with
+   postponements, real-referee strictness and crowds. Done:
+   deterministic per seed, cfg event catalogue renders.
+   Still open: exact rating/MoM formulas, live tactical changes.
 3. **Tactics model** ([tactics.md](tactics.md), `cm0102-core`
    tactics). Preset loading (`.pct` structure), 14-row
    instruction grid, team settings, lineup legality (11, caps,
@@ -105,9 +106,10 @@ green.
    news flow. Done when: a scripted season advances with
    balanced books and the specified board/finance events.
 6. **Full app flows** ([user-guide.md](user-guide.md), app).
-   League screens, options, holiday, jobs, search, editor
-   parity; network last. Done when: the new-career flow runs
-   end to end and every screen has a spec cross-check.
+   Splash, new-career flow, holiday, match-day shell with
+   theme and header/footer layout: done. Still open: league
+   screens, options, jobs, search, editor parity; network last.
+   Done when: every screen has a spec cross-check.
 7. **Original save compatibility** ([saves.md](saves.md), app +
    `cm0102-core`). Read 3.9.60/3.9.68 saves (container + RLE
    done; payload layouts as specified), then write 3.9.68.
