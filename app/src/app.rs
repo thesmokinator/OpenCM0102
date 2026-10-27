@@ -16,6 +16,8 @@
 
 mod career;
 mod editor;
+mod matchday;
+mod news;
 mod setup;
 mod shell;
 
@@ -24,8 +26,8 @@ use std::sync::mpsc;
 use std::sync::Arc;
 
 use cm0102_core::{
-    Club, ContinueRules, DataProvider, GameState, Player, Schedule, StopReason,
-    continue_until_event,
+    Club, ContinueOutcome, ContinueRules, DataProvider, GameState, Player, Schedule, StopReason,
+    process_day, stops_for,
 };
 use cm0102_db::{
     import_game_data, import_inventory, validate_source, CabinetSource, GameDataSource, IsoSource,
@@ -228,14 +230,39 @@ impl OpenCmApp {
         self.status = crate::i18n::t("app-disconnected");
     }
 
-    /// One Continue press: simulate days until the next manager-facing
-    /// event, then roll the calendar into a new season when exhausted.
+    /// One Continue press: present fresh news first, else simulate
+    /// days until the next manager-facing event, then roll the
+    /// calendar into a new season when exhausted. Own match days
+    /// enter the match-day screen instead of returning.
     fn advance_continue(&mut self) {
         use crate::i18n::{t, tr};
-        let schedule = self.state.schedule.clone();
-        let had_calendar = !schedule.fixtures.is_empty();
-        let outcome = continue_until_event(&mut self.state, &ContinueRules::default(), &schedule);
-        self.simulate_other_matches();
+        if !self.state.fresh_news().is_empty() {
+            self.open_news_queue();
+            self.status = t("shell-stop-inbox");
+            return;
+        }
+        let rules = ContinueRules::default();
+        let had_calendar = !self.state.schedule.fixtures.is_empty();
+        let mut days_advanced = 0;
+        let mut stop = StopReason::MaxDaysReached;
+        loop {
+            let schedule = self.state.schedule.clone();
+            let mut events = process_day(&mut self.state, &schedule);
+            days_advanced += 1;
+            self.simulate_day(false);
+            events.inbox_items += self.state.fresh_news().len() as u32;
+            if let Some(matched) = stops_for(&rules, &events) {
+                stop = matched;
+                break;
+            }
+            if days_advanced >= rules.max_days.max(1) {
+                break;
+            }
+        }
+        let outcome = ContinueOutcome {
+            days_advanced,
+            stop,
+        };
         let date = self.state.current_date.to_string();
         let reason = if had_calendar {
             match outcome.stop {
@@ -260,6 +287,11 @@ impl OpenCmApp {
             status = format!("{status} {}", tr("shell-new-season", &[("count", &count)]));
         }
         self.status = status;
+        if outcome.stop == StopReason::OwnMatch {
+            self.enter_match_day();
+        } else if !self.state.fresh_news().is_empty() {
+            self.open_news_queue();
+        }
     }
 
     /// Generate next season's calendar once the current one has no
@@ -670,24 +702,28 @@ impl OpenCmApp {
 
     /// Game shell: the main-menu screen plus the bottom Continue bar.
     /// The only ways out are the Menu submenu and the exit dialog.
+    /// Continue hides on match days: the match must be played first.
     fn show_game_shell(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("action_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label(&self.status);
-                ui.with_layout(
-                    egui::Layout::right_to_left(egui::Align::Center),
-                    |ui| {
-                        if ui.button(crate::i18n::t("shell-continue")).clicked() {
-                            self.advance_continue();
-                        }
-                    },
-                );
+                if self.shell.match_day.is_none() {
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            if ui.button(crate::i18n::t("shell-continue")).clicked() {
+                                self.advance_continue();
+                            }
+                        },
+                    );
+                }
             });
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             self.show_game(ui);
         });
+        self.show_news_queue(ctx);
     }
 
     /// Modal exit confirmation, armed from the in-game Menu submenu.

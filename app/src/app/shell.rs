@@ -8,15 +8,15 @@
 //! honest placeholder citing the backing spec everywhere else.
 
 use cm0102_core::{
-    Fixture, FixtureResult, Formation, Lineup, MatchContext, MatchEngine, MatchPlayer, Mentality,
-    Player, SavedCareer, Schedule, TableRules, TeamTactics, LINEUP_SIZE, process_day,
+    Fixture, Formation, Lineup, MatchPlayer, Mentality, Player, SavedCareer,
+    Schedule, TableRules, TeamTactics, LINEUP_SIZE, process_day,
 };
-use cm0102_match::SimulationEngine;
 
 /// Fallback average ability when no lineup resolves (placeholder).
 const DEFAULT_AVG_CA: f32 = 140.0;
 
 use super::career::{save_career_to, saves_dir};
+use super::matchday::MatchDayState;
 use super::*;
 use crate::i18n::{t, tr};
 
@@ -133,13 +133,26 @@ pub struct ShellState {
     pub tactics_selected: Option<usize>,
     /// Played fixture shown in the detail panel, if any.
     pub fixture_detail: Option<Fixture>,
+    /// Active match-day screen, hiding the sidebar layout.
+    pub match_day: Option<MatchDayState>,
+    /// Fresh-news ids queued for modal presentation.
+    pub news_queue: Vec<u64>,
+    /// Queue size when opened, for the (i/n) title.
+    pub news_queue_total: usize,
+    /// Inbox item selected in the News section, if any.
+    pub news_selected: Option<u64>,
 }
 
 impl OpenCmApp {
     /// Main-menu screen: top info bar, next match, sidebar, content.
+    /// The match-day screen replaces everything below the top bar.
     pub fn show_game(&mut self, ui: &mut egui::Ui) {
         self.show_game_top_bar(ui);
         ui.separator();
+        if self.shell.match_day.is_some() {
+            self.show_matchday(ui);
+            return;
+        }
         self.show_next_match(ui);
         ui.separator();
         ui.horizontal(|ui| {
@@ -168,11 +181,12 @@ impl OpenCmApp {
             ui.label(self.state.current_date.to_string());
             ui.separator();
             if ui.button(t("shell-holiday-7-days")).clicked() {
-                let schedule = self.state.schedule.clone();
                 for _ in 0..7 {
+                    let schedule = self.state.schedule.clone();
                     process_day(&mut self.state, &schedule);
+                    // The assistant takes charge of due matches.
+                    self.simulate_day(true);
                 }
-                self.simulate_other_matches();
                 self.rollover_calendar_if_needed();
                 self.status = tr(
                     "shell-holidayed-to",
@@ -218,10 +232,18 @@ impl OpenCmApp {
             Some(fixture) => {
                 let date = fixture.date.to_string();
                 let game = self.fixture_line(fixture);
-                ui.label(tr(
-                    "fixtures-next-match",
-                    &[("match", &game), ("date", &date)],
-                ));
+                ui.horizontal(|ui| {
+                    ui.label(tr(
+                        "fixtures-next-match",
+                        &[("match", &game), ("date", &date)],
+                    ));
+                    let due = managed
+                        .and_then(|id| self.state.schedule.due_unplayed(id, today))
+                        .is_some();
+                    if due && ui.button(t("fixtures-match-day")).clicked() {
+                        self.enter_match_day();
+                    }
+                });
             }
             None => {
                 ui.label(t("fixtures-no-upcoming"));
@@ -229,13 +251,19 @@ impl OpenCmApp {
         }
     }
 
-    /// Section list on the left, original-game order.
+    /// Section list on the left, original-game order. News carries
+    /// an unread badge.
     fn show_sidebar(&mut self, ui: &mut egui::Ui) {
+        let unread = self.unread_news_count();
         ui.vertical(|ui| {
             ui.set_min_width(140.0);
             for section in GameSection::ALL {
+                let mut label = section.label();
+                if *section == GameSection::News && unread > 0 {
+                    label = format!("{label} ({unread})");
+                }
                 let selected = self.shell.section == *section;
-                if ui.selectable_label(selected, section.label()).clicked() {
+                if ui.selectable_label(selected, label).clicked() {
                     self.shell.section = *section;
                 }
             }
@@ -250,6 +278,7 @@ impl OpenCmApp {
             GameSection::Tactics => self.show_tactics_section(ui),
             GameSection::Fixtures => self.show_fixtures_section(ui),
             GameSection::LeagueTable => self.show_table_section(ui),
+            GameSection::News => self.show_news_section(ui),
             section => {
                 ui.heading(section.label());
                 ui.label(tr("shell-not-implemented", &[("spec", section.spec())]));
@@ -293,8 +322,8 @@ impl OpenCmApp {
             });
     }
 
-    /// Managed club's fixtures: results so far and upcoming rounds,
-    /// with a Play button for due matches (today or overdue).
+    /// Managed club's fixtures: results so far and upcoming rounds.
+    /// Matches are played from the match-day screen, never here.
     fn show_fixtures_section(&mut self, ui: &mut egui::Ui) {
         ui.heading(t("section-fixtures"));
         let Some(managed_id) = self.state.managed_club_id else {
@@ -357,13 +386,6 @@ impl OpenCmApp {
                         ui.label(fixture.date.to_string());
                     }
                     ui.label(self.fixture_line(fixture));
-                    let due = fixture.date <= today;
-                    if ui
-                        .add_enabled(due, egui::Button::new(t("fixtures-play")))
-                        .clicked()
-                    {
-                        self.play_fixture(fixture.clone());
-                    }
                     ui.end_row();
                 }
             });
@@ -469,48 +491,11 @@ impl OpenCmApp {
             return;
         };
         ui.separator();
-        ui.heading(t("fixtures-detail-events"));
-        for event in &report.events {
-            ui.label(event);
-        }
-        let stats = report.stats;
-        ui.label(tr(
-            "fixtures-detail-stats",
-            &[
-                ("hs", &stats.home_shots.to_string()),
-                ("as", &stats.away_shots.to_string()),
-                ("hot", &stats.home_on_target.to_string()),
-                ("aot", &stats.away_on_target.to_string()),
-            ],
-        ));
-        ui.heading(t("fixtures-detail-ratings"));
-        egui::Grid::new("shell_ratings_grid")
-            .striped(true)
-            .show(ui, |ui| {
-                ui.strong(t("shell-th-name"));
-                ui.strong(t("fixtures-th-rating"));
-                ui.strong(t("fixtures-th-minutes"));
-                ui.strong(t("fixtures-th-goals"));
-                ui.strong(t("fixtures-th-cards"));
-                ui.end_row();
-                for rating in &report.ratings {
-                    ui.label(&rating.name);
-                    ui.label(format!("{}.{}", rating.rating / 10, rating.rating % 10));
-                    ui.label(rating.minutes.to_string());
-                    ui.label(rating.goals.to_string());
-                    let cards = match (rating.yellow, rating.red) {
-                        (false, false) => t("missing-value"),
-                        (true, false) => "Y".to_string(),
-                        (_, true) => "R".to_string(),
-                    };
-                    ui.label(cards);
-                    ui.end_row();
-                }
-            });
+        super::matchday::show_match_report(ui, &report);
     }
 
     /// One-line display of a fixture: score when played, versus when not.
-    fn fixture_line(&self, fixture: &Fixture) -> String {
+    pub(super) fn fixture_line(&self, fixture: &Fixture) -> String {
         let home = self.club_display_name(fixture.home_club_id);
         let away = self.club_display_name(fixture.away_club_id);
         match fixture.result {
@@ -536,61 +521,13 @@ impl OpenCmApp {
 
     /// Mentality and deep-block flag for a side: the managed club
     /// plays its own instructions, every other club a balanced default.
-    fn side_instructions(&self, club_id: u32) -> (Mentality, bool) {
+    pub(super) fn side_instructions(&self, club_id: u32) -> (Mentality, bool) {
         if self.state.managed_club_id == Some(club_id) {
             let team = &self.state.tactics.team;
             (team.mentality, team.men_behind_ball)
         } else {
             (Mentality::Normal, false)
         }
-    }
-
-    /// Simulate one due fixture with the match engine, record the score
-    /// and report it in the status line.
-    fn play_fixture(&mut self, fixture: Fixture) {
-        let (home_players, home_subs) = self.match_squad(fixture.home_club_id);
-        let (away_players, away_subs) = self.match_squad(fixture.away_club_id);
-        let (home_mentality, home_bus) = self.side_instructions(fixture.home_club_id);
-        let (away_mentality, away_bus) = self.side_instructions(fixture.away_club_id);
-        let context = MatchContext {
-            home_club_id: fixture.home_club_id,
-            away_club_id: fixture.away_club_id,
-            date: fixture.date,
-            seed: fixture.seed(),
-            home_avg_ca: self.team_avg_ca(fixture.home_club_id),
-            away_avg_ca: self.team_avg_ca(fixture.away_club_id),
-            home_players,
-            away_players,
-            home_subs,
-            away_subs,
-            home_mentality,
-            away_mentality,
-            home_men_behind_ball: home_bus,
-            away_men_behind_ball: away_bus,
-            // League fixtures only until cups land.
-            extra_time_if_level: false,
-        };
-        let outcome = SimulationEngine.simulate(&context);
-        self.serve_match_bans(fixture.home_club_id, fixture.away_club_id);
-        self.state.schedule.record_result(
-            fixture.date,
-            fixture.home_club_id,
-            fixture.away_club_id,
-            FixtureResult {
-                home_goals: outcome.home_goals,
-                away_goals: outcome.away_goals,
-            },
-            Some(outcome.clone()),
-        );
-        self.state.apply_match_report(&outcome);
-        let played = Fixture {
-            result: Some(FixtureResult {
-                home_goals: outcome.home_goals,
-                away_goals: outcome.away_goals,
-            }),
-            ..fixture
-        };
-        self.status = self.fixture_line(&played);
     }
 
     /// Formation picker plus the starting eleven, with best-eleven
@@ -745,12 +682,12 @@ impl OpenCmApp {
 
     /// Average current ability of a club's eleven: the stored lineup
     /// for the managed club, a best-eleven auto-pick for AI clubs.
-    fn team_avg_ca(&self, club_id: u32) -> f32 {
+    pub(super) fn team_avg_ca(&self, club_id: u32) -> f32 {
         self.team_avg_ca_cached(club_id, &mut std::collections::HashMap::new())
     }
 
     /// Cached variant for batch simulation across many fixtures.
-    fn team_avg_ca_cached(
+    pub(super) fn team_avg_ca_cached(
         &self,
         club_id: u32,
         cache: &mut std::collections::HashMap<u32, f32>,
@@ -797,12 +734,12 @@ impl OpenCmApp {
     /// Starting eleven and named substitutes as engine players: the
     /// stored lineup for the managed club, a best-eleven auto-pick
     /// for AI clubs.
-    fn match_squad(&self, club_id: u32) -> (Vec<MatchPlayer>, Vec<MatchPlayer>) {
+    pub(super) fn match_squad(&self, club_id: u32) -> (Vec<MatchPlayer>, Vec<MatchPlayer>) {
         self.match_squad_cached(club_id, &mut std::collections::HashMap::new())
     }
 
     /// Cached variant for batch simulation across many fixtures.
-    fn match_squad_cached(
+    pub(super) fn match_squad_cached(
         &self,
         club_id: u32,
         cache: &mut std::collections::HashMap<u32, (Vec<MatchPlayer>, Vec<MatchPlayer>)>,
@@ -874,69 +811,10 @@ impl OpenCmApp {
     /// Simulate every due AI fixture: unplayed, dated today or
     /// earlier, not involving the managed club. The manager's own
     /// matches are never touched — overdue ones stay playable.
-    pub(super) fn simulate_other_matches(&mut self) {
-        let today = self.state.current_date;
-        let managed = self.state.managed_club_id;
-        let due: Vec<Fixture> = self
-            .state
-            .schedule
-            .fixtures
-            .iter()
-            .filter(|fixture| {
-                fixture.result.is_none()
-                    && fixture.date <= today
-                    && !managed.is_some_and(|id| {
-                        fixture.home_club_id == id || fixture.away_club_id == id
-                    })
-            })
-            .cloned()
-            .collect();
-        let mut strengths = std::collections::HashMap::new();
-        let mut squads: std::collections::HashMap<u32, (Vec<MatchPlayer>, Vec<MatchPlayer>)> =
-            std::collections::HashMap::new();
-        for fixture in due {
-            let (home_players, home_subs) =
-                self.match_squad_cached(fixture.home_club_id, &mut squads);
-            let (away_players, away_subs) =
-                self.match_squad_cached(fixture.away_club_id, &mut squads);
-            let context = MatchContext {
-                home_club_id: fixture.home_club_id,
-                away_club_id: fixture.away_club_id,
-                date: fixture.date,
-                seed: fixture.seed(),
-                home_avg_ca: self.team_avg_ca_cached(fixture.home_club_id, &mut strengths),
-                away_avg_ca: self.team_avg_ca_cached(fixture.away_club_id, &mut strengths),
-                home_players,
-                away_players,
-                home_subs,
-                away_subs,
-                home_mentality: Mentality::Normal,
-                away_mentality: Mentality::Normal,
-                home_men_behind_ball: false,
-                away_men_behind_ball: false,
-                // League fixtures only until cups land.
-                extra_time_if_level: false,
-            };
-            let outcome = SimulationEngine.simulate(&context);
-            self.serve_match_bans(fixture.home_club_id, fixture.away_club_id);
-            self.state.schedule.record_result(
-                fixture.date,
-                fixture.home_club_id,
-                fixture.away_club_id,
-                FixtureResult {
-                    home_goals: outcome.home_goals,
-                    away_goals: outcome.away_goals,
-                },
-                Some(outcome.clone()),
-            );
-            self.state.apply_match_report(&outcome);
-        }
-    }
-
     /// Serve one suspension match for every squad member of both
     /// clubs. Runs before the new report is applied, so fresh bans
     /// start counting from the next match.
-    fn serve_match_bans(&mut self, home_club_id: u32, away_club_id: u32) {
+    pub(super) fn serve_match_bans(&mut self, home_club_id: u32, away_club_id: u32) {
         let mut ids = Vec::new();
         if let Some(provider) = &self.provider {
             for club_id in [home_club_id, away_club_id] {
@@ -949,7 +827,7 @@ impl OpenCmApp {
     }
 
     /// Club display name, falling back to the raw id when unknown.
-    fn club_display_name(&self, club_id: u32) -> String {
+    pub(super) fn club_display_name(&self, club_id: u32) -> String {
         self.clubs
             .iter()
             .find(|club| club.id == club_id)
