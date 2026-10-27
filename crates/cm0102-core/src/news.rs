@@ -25,6 +25,8 @@ pub enum NewsCategory {
     Suspension,
     /// Board confidence and expectations.
     Board,
+    /// A fixture was postponed (unplayable pitch).
+    Postponed,
 }
 
 /// One inbox item addressed to the manager.

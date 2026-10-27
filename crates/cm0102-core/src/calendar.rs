@@ -67,6 +67,16 @@ impl GameDate {
         }
     }
 
+    /// One-based day of year (1 = 1 January) for season-table
+    /// lookups such as weather.
+    pub fn day_of_year(self) -> u16 {
+        let mut day = self.day;
+        for month in 1..self.month {
+            day += Self::days_in_month(self.year, month);
+        }
+        day.min(366) as u16
+    }
+
     /// The date `days` later, rolling over month and year boundaries.
     /// Round spacing is small (weekly), so a plain loop is enough.
     pub fn add_days(self, days: u32) -> Self {
@@ -140,6 +150,15 @@ mod tests {
             GameDate::new(2001, 7, 1).add_days(0),
             GameDate::new(2001, 7, 1)
         );
+    }
+
+    /// One-based day of year round-trips with `from_day_of_year`.
+    #[test]
+    fn day_of_year_counts_from_january() {
+        assert_eq!(GameDate::new(2001, 1, 1).day_of_year(), 1);
+        assert_eq!(GameDate::new(1977, 8, 17).day_of_year(), 229);
+        assert_eq!(GameDate::new(2001, 12, 31).day_of_year(), 365);
+        assert_eq!(GameDate::new(2000, 12, 31).day_of_year(), 366);
     }
 
     /// Day-of-year conversion lands on the right calendar date

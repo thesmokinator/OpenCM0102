@@ -286,6 +286,28 @@ impl Schedule {
         true
     }
 
+    /// Move one unplayed fixture to `new_date` (a postponement).
+    /// Returns false when no unplayed fixture matches, leaving the
+    /// schedule untouched.
+    pub fn postpone(
+        &mut self,
+        date: GameDate,
+        home_club_id: u32,
+        away_club_id: u32,
+        new_date: GameDate,
+    ) -> bool {
+        let Some(fixture) = self.fixtures.iter_mut().find(|fixture| {
+            fixture.date == date
+                && fixture.home_club_id == home_club_id
+                && fixture.away_club_id == away_club_id
+                && fixture.result.is_none()
+        }) else {
+            return false;
+        };
+        fixture.date = new_date;
+        true
+    }
+
     /// Latest fixture date, if the schedule is non-empty.
     pub fn last_date(&self) -> Option<GameDate> {
         self.fixtures.iter().map(|fixture| fixture.date).max()
@@ -617,6 +639,23 @@ mod tests {
         assert!(!schedule.record_result(GameDate::SEASON_START, 2, 1, score, None));
         assert!(!schedule.record_result(GameDate::new(2001, 7, 2), 1, 2, score, None));
         assert_eq!(schedule.fixtures[0].result, Some(score));
+    }
+
+    #[test]
+    fn postpone_moves_one_unplayed_fixture() {
+        let mut schedule =
+            Schedule::league_calendar(7, &[1, 2], GameDate::SEASON_START, 7, 1);
+        let moved = GameDate::SEASON_START.add_days(7);
+        assert!(schedule.postpone(GameDate::SEASON_START, 1, 2, moved));
+        assert!(!schedule.postpone(GameDate::SEASON_START, 1, 2, moved));
+        assert!(!schedule.postpone(GameDate::SEASON_START, 2, 1, moved));
+        let fixture = schedule
+            .fixtures
+            .iter()
+            .find(|fixture| fixture.home_club_id == 1 && fixture.away_club_id == 2)
+            .expect("fixture kept");
+        assert_eq!(fixture.date, moved);
+        assert_eq!(fixture.result, None);
     }
 
     /// Played fixtures stop flagging match days.

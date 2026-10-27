@@ -6,7 +6,7 @@
 use std::sync::Mutex;
 
 use cm0102_core::traits::{CoreError, Result};
-use cm0102_core::{Club, DataProvider, Nation, Player};
+use cm0102_core::{Club, DataProvider, Nation, Official, Player};
 use rusqlite::Connection;
 
 /// SQLite-backed read access to the imported game database.
@@ -178,6 +178,45 @@ impl DataProvider for SqliteDataProvider {
         rows.collect::<std::result::Result<Vec<Nation>, rusqlite::Error>>()
             .map_err(to_core)
     }
+
+    fn list_officials_by_nation(&self, nation_id: u32) -> Result<Vec<Official>> {
+        let connection = self.connection.lock().expect("provider lock poisoned");
+        let mut statement = connection
+            .prepare(
+                "SELECT id, first_name, second_name, nation_id, strictness, reputation \
+                 FROM officials WHERE nation_id = ?1 ORDER BY second_name, first_name",
+            )
+            .map_err(to_core)?;
+        let rows = statement
+            .query_map([nation_id], |row| {
+                let first: String = row.get(1)?;
+                let second: String = row.get(2)?;
+                Ok(Official {
+                    id: row.get::<_, i64>(0)? as u32,
+                    name: format!("{first} {second}").trim().to_string(),
+                    nation_id: row.get::<_, Option<i64>>(3)?.map(|id| id as u32),
+                    strictness: row.get::<_, Option<i64>>(4)?.map(|value| value as u8),
+                    reputation: row.get::<_, Option<i16>>(5)?,
+                })
+            })
+            .map_err(to_core)?;
+        rows.collect::<std::result::Result<Vec<Official>, rusqlite::Error>>()
+            .map_err(to_core)
+    }
+
+    fn competition_reputation(&self, competition_id: u32) -> Result<Option<i16>> {
+        let connection = self.connection.lock().expect("provider lock poisoned");
+        let mut statement = connection
+            .prepare(
+                "SELECT reputation FROM competitions WHERE id = ?1 AND kind = 'club'",
+            )
+            .map_err(to_core)?;
+        let mut rows = statement
+            .query_map([competition_id], |row| row.get::<_, Option<i16>>(0))
+            .map_err(to_core)?;
+        let first: Option<Option<i16>> = rows.next().transpose().map_err(to_core)?;
+        Ok(first.flatten())
+    }
 }
 
 #[cfg(test)]
@@ -272,5 +311,44 @@ mod tests {
         assert_eq!(nations.len(), 2);
         assert_eq!(nations[0].name, "England");
         assert_eq!(nations[1].name, "Italy");
+    }
+
+    /// Officials filter by nation and join their names.
+    #[test]
+    fn lists_officials_by_nation() {
+        let connection = Connection::open_in_memory().unwrap();
+        crate::importer::create_schema(&connection).unwrap();
+        connection
+            .execute(
+                "INSERT INTO officials (id, first_name, second_name, nation_id, strictness, \
+                 reputation) VALUES (1, 'Pierluigi', 'Collina', 1, 18, 150), \
+                 (2, 'Mike', 'Riley', 2, 10, 90)",
+                [],
+            )
+            .unwrap();
+        let provider = SqliteDataProvider::new(connection);
+        let italians = provider.list_officials_by_nation(1).unwrap();
+        assert_eq!(italians.len(), 1);
+        assert_eq!(italians[0].name, "Pierluigi Collina");
+        assert_eq!(italians[0].strictness, Some(18));
+        assert_eq!(italians[0].reputation, Some(150));
+        assert!(provider.list_officials_by_nation(999).unwrap().is_empty());
+    }
+
+    /// Competition reputation reads through, unknown ids read as none.
+    #[test]
+    fn reads_competition_reputation() {
+        let connection = Connection::open_in_memory().unwrap();
+        crate::importer::create_schema(&connection).unwrap();
+        connection
+            .execute(
+                "INSERT INTO competitions (id, name, short_name, three_letter, reputation, kind) \
+                 VALUES (7, 'English Premier Division', 'Prem', 'ENG', 18, 'club')",
+                [],
+            )
+            .unwrap();
+        let provider = SqliteDataProvider::new(connection);
+        assert_eq!(provider.competition_reputation(7).unwrap(), Some(18));
+        assert_eq!(provider.competition_reputation(999).unwrap(), None);
     }
 }

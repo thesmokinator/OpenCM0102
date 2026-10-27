@@ -32,6 +32,24 @@ pub struct Nation {
     pub name: String,
 }
 
+/// A match official (referee) from the source data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Official {
+    /// Stable identifier from the source data.
+    pub id: u32,
+    /// Display name, e.g. `Pierluigi Collina`.
+    pub name: String,
+    /// Nation id, when national in scope.
+    pub nation_id: Option<u32>,
+    /// Strictness 0-20. Missing in databases imported before the
+    /// field was read.
+    #[serde(default)]
+    pub strictness: Option<u8>,
+    /// Reputation, weighting match assignment.
+    #[serde(default)]
+    pub reputation: Option<i16>,
+}
+
 /// The human player's manager in a career.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manager {
@@ -150,6 +168,11 @@ pub const ATTRIBUTE_NAMES: [&str; 54] = [
     "Vision",
     "Work Rate",
 ];
+
+/// Tackling position inside [`ATTRIBUTE_NAMES`].
+pub const ATTR_TACKLING: usize = 46;
+/// Marking position inside [`ATTRIBUTE_NAMES`].
+pub const ATTR_MARKING: usize = 35;
 
 /// Positions of widely used attributes inside [`ATTRIBUTE_NAMES`].
 pub const ATTR_GOALKEEPER: usize = 0;

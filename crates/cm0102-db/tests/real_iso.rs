@@ -11,7 +11,7 @@ use cm0102_core::{
     DEFAULT_LEGS, DEFAULT_ROUND_SPACING,
 };
 use cm0102_db::source::{CabinetSource, GameDataSource, IsoSource};
-use cm0102_db::formats::parse_clubs;
+use cm0102_db::formats::{parse_clubs, parse_names, parse_nations, parse_officials};
 
 /// Real-data season flow, skipped without `CM0102_ISO`.
 #[test]
@@ -80,4 +80,28 @@ fn real_iso_reaches_first_playable_match() {
             .iter()
             .all(|fixture| fixture.date.year >= last.year)
     );
+
+    // Officials carry 0-20 strictness; England's pool has rated referees.
+    let first_names = parse_names(&source.read_entry("CM3 Data/first_names.dat").expect("names"));
+    let second_names =
+        parse_names(&source.read_entry("CM3 Data/second_names.dat").expect("names"));
+    let officials = parse_officials(
+        &source.read_entry("CM3 Data/officials.dat").expect("officials.dat"),
+        &first_names,
+        &second_names,
+    );
+    assert!(officials.len() > 3000, "officials: {}", officials.len());
+    assert!(officials.iter().all(|o| o.strictness <= 20));
+    // Nation ids shift between data versions: resolve by name.
+    let nations = parse_nations(&source.read_entry("CM3 Data/nation.dat").expect("nation.dat"));
+    let england = nations
+        .iter()
+        .find(|nation| nation.name == "England")
+        .expect("England")
+        .id;
+    let rated_english = officials
+        .iter()
+        .filter(|o| o.nation_id == Some(england) && o.strictness > 0)
+        .count();
+    assert!(rated_english > 10, "rated english: {rated_english}");
 }

@@ -383,6 +383,8 @@ pub struct Official {
     pub potential_ability: Option<i16>,
     /// Reputation.
     pub reputation: Option<i16>,
+    /// Strictness 0-20 (byte 37): the booking descriptor source.
+    pub strictness: u8,
 }
 
 /// One row of a competition history file.
@@ -622,6 +624,7 @@ pub fn parse_officials(
                 current_ability: field_i16(record, 30),
                 potential_ability: field_i16(record, 32),
                 reputation: field_i16(record, 34),
+                strictness: record.get(37).copied().unwrap_or(0),
             })
         })
         .collect()

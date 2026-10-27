@@ -15,10 +15,15 @@
 
 use cm0102_core::{
     EventKind, MatchContext, MatchEngine, MatchEvent, MatchInjury, MatchPlayer, MatchResult,
-    MatchStats, Mentality,
-    Shootout, ATTR_AGGRESSION, ATTR_ATTACKER, ATTR_DIRTINESS, ATTR_FINISHING, ATTR_HANDLING,
-    ATTR_HEADING, ATTR_INJURY_PRONENESS, ATTR_JUMPING, ATTR_LONG_SHOTS, ATTR_ONE_ON_ONES,
-    ATTR_PENALTIES, ATTR_REFLEXES,
+    MatchStats, Mentality, MinuteStats,
+    Shootout, ATTR_AGGRESSION, ATTR_ANTICIPATION, ATTR_ATTACKER, ATTR_DIRTINESS, ATTR_FINISHING,
+    ATTR_HANDLING, ATTR_HEADING, ATTR_INJURY_PRONENESS, ATTR_JUMPING, ATTR_LONG_SHOTS,
+    ATTR_ONE_ON_ONES, ATTR_PASSING, ATTR_PENALTIES, ATTR_REFLEXES, ATTR_TACKLING,
+};
+
+pub mod commentary;
+pub use commentary::{
+    CfgTokens, CommentaryPack, MatchCommentary, RenderedLine, TextHint, render, render_match,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -35,6 +40,10 @@ const DEFENSIVE_MENTALITY_RATE: f32 = 0.85;
 const BEHIND_BALL_DAMPEN: f32 = 0.9;
 /// Chance-rate lift per point of average side morale.
 const MORALE_RATE_STEP: f32 = 0.03;
+/// Chance-rate dampener in downpour, sleet or snow.
+const WET_CHANCE_DAMPEN: f32 = 0.94;
+/// Chance-rate dampener in a gale.
+const GALE_CHANCE_DAMPEN: f32 = 0.95;
 /// Closest shooting distance in metres.
 const MIN_DISTANCE: u32 = 5;
 /// Distance spread above the minimum, in metres.
@@ -75,6 +84,30 @@ const SHOOTOUT_ROUNDS: usize = 5;
 const BASE_RATING: i32 = 70;
 /// Rating floor/ceiling in deci-points.
 const RATING_CLAMP: (i32, i32) = (50, 100);
+/// Completed passes per team per minute: base plus a roll spread.
+const PASSES_BASE: u32 = 3;
+/// Pass spread above the base per team per minute.
+const PASSES_SPREAD: u32 = 4;
+/// Tackles won probability per team per minute, in permille.
+const TACKLE_PER_MILLE: u32 = 200;
+/// Headers won probability per team per minute, in permille.
+const HEADER_PER_MILLE: u32 = 150;
+/// Interception probability per team per minute, in permille.
+const INTERCEPT_PER_MILLE: u32 = 80;
+/// Offside probability per team per minute, in permille.
+const OFFSIDE_PER_MILLE: u32 = 15;
+/// Throw-in probability per team per minute, in permille.
+const THROW_PER_MILLE: u32 = 220;
+/// Free-kick probability per team per minute, in permille.
+const FREEKICK_PER_MILLE: u32 = 120;
+/// Corner probability per team per minute, in permille.
+const CORNER_PER_MILLE: u32 = 60;
+/// Goals scored via the frame, in percent of goals.
+const POST_IN_PERCENT: u32 = 8;
+/// Off-target shots hitting the frame, in percent.
+const WOODWORK_PERCENT: u32 = 12;
+/// Off-target shots blocked by a defender, in percent.
+const BLOCKED_PERCENT: u32 = 15;
 
 /// How a chance is finished: the winning category of the competing
 /// attribute rolls.
@@ -109,6 +142,20 @@ struct Tracker {
     missed_pen: bool,
     /// Scored an own goal.
     own_goal: bool,
+    /// Shots attempted.
+    shots: u16,
+    /// Shots on target.
+    on_target: u16,
+    /// Tackles won.
+    tackles: u16,
+    /// Passes completed.
+    passes: u16,
+    /// Headers won.
+    headers: u16,
+    /// Interceptions made.
+    interceptions: u16,
+    /// Times flagged offside.
+    offsides: u16,
 }
 
 impl Tracker {
@@ -123,6 +170,13 @@ impl Tracker {
             goals: 0,
             missed_pen: false,
             own_goal: false,
+            shots: 0,
+            on_target: 0,
+            tackles: 0,
+            passes: 0,
+            headers: 0,
+            interceptions: 0,
+            offsides: 0,
         }
     }
 
@@ -202,6 +256,13 @@ impl Side {
                 goals: 0,
                 missed_pen: false,
                 own_goal: false,
+                shots: 0,
+                on_target: 0,
+                tackles: 0,
+                passes: 0,
+                headers: 0,
+                interceptions: 0,
+                offsides: 0,
             },
         );
         self.subs_used += 1;
@@ -227,6 +288,10 @@ impl MatchEngine for SimulationEngine {
             shootout: None,
             injuries: Vec::new(),
             first_half_end: 45,
+            timeline: Vec::new(),
+            weather: ctx.weather,
+            referee: Some(ctx.referee.clone()),
+            attendance: None,
         };
         let mut events: Vec<MatchEvent> = Vec::new();
         let mut sides = [
@@ -235,11 +300,13 @@ impl MatchEngine for SimulationEngine {
         ];
         let (mut minutes, first_half_end) = full_time(&mut rng);
         result.first_half_end = first_half_end;
+        events.push(whistle(1, EventKind::Kickoff, 52));
         play_period(&mut rng, ctx, &mut sides, 1, minutes, &mut result, &mut events);
         if roll(&mut rng, 100) < PENALTY_PERCENT {
             let minute = roll(&mut rng, minutes) + 1;
             resolve_penalty(&mut rng, &mut sides, minute, &mut result, &mut events);
         }
+        events.push(whistle(first_half_end, EventKind::HalfTime, 433));
         if ctx.extra_time_if_level && result.home_goals == result.away_goals {
             play_period(
                 &mut rng,
@@ -259,11 +326,13 @@ impl MatchEngine for SimulationEngine {
         sides[1].conceded = result.home_goals;
         sides[0].won = result.home_goals > result.away_goals;
         sides[1].won = result.away_goals > result.home_goals;
+        result.stats = fold_timeline(&result.timeline);
         for (home, side) in [&sides[0], &sides[1]].into_iter().enumerate() {
             for tracker in side.pitch.iter().chain(side.departed.iter()) {
                 result.ratings.push(rate(tracker, side, home == 0, minutes));
             }
         }
+        events.push(whistle(minutes, EventKind::FullTime, 193));
         events.sort_by_key(|event| event.minute);
         result.events = events;
         result
@@ -291,16 +360,104 @@ fn play_period(
     events: &mut Vec<MatchEvent>,
 ) {
     for minute in first..=last {
+        let mut played = MinuteStats::default();
         for home in [true, false] {
-            let index = usize::from(home);
-            maybe_book(rng, &mut sides[index], home, minute, events);
+            // sides[0] is home: true -> 0.
+            let index = usize::from(!home);
+            maybe_book(
+                rng,
+                &mut sides[index],
+                home,
+                minute,
+                ctx.referee.strictness,
+                events,
+            );
             maybe_injure(rng, &mut sides[index], home, minute, events, result);
             maybe_substitute(&mut sides[index], home, minute, events);
+            ambient_minute(rng, &mut sides[index], &mut played, home);
             if chance_falls(rng, ctx, sides, home) {
-                resolve_chance(rng, sides, home, minute, result, events);
+                resolve_chance(rng, sides, home, minute, result, &mut played, events);
             }
         }
+        result.timeline.push(played);
     }
+}
+
+/// Ambient minute: passes, tackles, headers, interceptions,
+/// offsides and restarts resolve per team per minute with
+/// attribute-weighted credit. The schema mirrors the original
+/// ten-counter block; the per-minute rates are calibrated
+/// placeholders.
+fn ambient_minute(
+    rng: &mut ChaCha8Rng,
+    side: &mut Side,
+    played: &mut MinuteStats,
+    home: bool,
+) {
+    if side.pitch.is_empty() {
+        return;
+    }
+    let acc = if home { &mut played.home } else { &mut played.away };
+    let passes = PASSES_BASE + roll(rng, PASSES_SPREAD);
+    acc.passes += passes as u16;
+    for _ in 0..passes {
+        if let Some(index) = pick_weighted(rng, &side.pitch, ATTR_PASSING) {
+            side.pitch[index].passes += 1;
+        }
+    }
+    if roll(rng, 1000) < TACKLE_PER_MILLE {
+        acc.tackles += 1;
+        if let Some(index) = pick_weighted(rng, &side.pitch, ATTR_TACKLING) {
+            side.pitch[index].tackles += 1;
+        }
+    }
+    if roll(rng, 1000) < HEADER_PER_MILLE {
+        acc.headers += 1;
+        if let Some(index) = pick_weighted(rng, &side.pitch, ATTR_HEADING) {
+            side.pitch[index].headers += 1;
+        }
+    }
+    if roll(rng, 1000) < INTERCEPT_PER_MILLE {
+        if let Some(index) = pick_weighted(rng, &side.pitch, ATTR_ANTICIPATION) {
+            side.pitch[index].interceptions += 1;
+        }
+    }
+    if roll(rng, 1000) < OFFSIDE_PER_MILLE {
+        acc.offsides += 1;
+        if let Some(index) = pick_weighted(rng, &side.pitch, ATTR_ATTACKER) {
+            side.pitch[index].offsides += 1;
+        }
+    }
+    if roll(rng, 1000) < THROW_PER_MILLE {
+        acc.throw_ins += 1;
+    }
+    if roll(rng, 1000) < FREEKICK_PER_MILLE {
+        acc.free_kicks += 1;
+    }
+    if roll(rng, 1000) < CORNER_PER_MILLE {
+        acc.corners += 1;
+    }
+}
+
+/// Pitch index weighted by one attribute (fitness-scaled, +1 so
+/// everyone stays eligible). `None` when nobody plays.
+fn pick_weighted(rng: &mut ChaCha8Rng, pitch: &[Tracker], index: usize) -> Option<usize> {
+    if pitch.is_empty() {
+        return None;
+    }
+    let total: u32 = pitch
+        .iter()
+        .map(|tracker| bound(&tracker.player, index) + 1)
+        .sum();
+    let mut draw = roll(rng, total);
+    for (i, tracker) in pitch.iter().enumerate() {
+        let weight = bound(&tracker.player, index) + 1;
+        if draw < weight {
+            return Some(i);
+        }
+        draw -= weight;
+    }
+    Some(pitch.len() - 1)
 }
 
 /// Penalty shootout: five rounds with early decision, then sudden
@@ -342,6 +499,8 @@ fn shootout(
         kind: EventKind::Shootout,
         player: if home_wins { "Home" } else { "Away" }.to_string(),
         other: Some(format!("{}-{}", scored[0], scored[1])),
+        commentary_id: Some(196),
+        distance_yards: None,
     });
     Shootout {
         home_scored: scored[0],
@@ -406,7 +565,7 @@ fn chance_falls(rng: &mut ChaCha8Rng, ctx: &MatchContext, sides: &[Side; 2], hom
         )
     };
     let ratio = (own / opp).clamp(RATE_CLAMP.0, RATE_CLAMP.1);
-    let men = sides[usize::from(home)].pitch.len() as f32 / 11.0;
+    let men = sides[usize::from(!home)].pitch.len() as f32 / 11.0;
     let mentality_rate = match mentality {
         Mentality::Attacking => ATTACKING_MENTALITY_RATE,
         Mentality::Normal => 1.0,
@@ -418,7 +577,21 @@ fn chance_falls(rng: &mut ChaCha8Rng, ctx: &MatchContext, sides: &[Side; 2], hom
         rate *= BEHIND_BALL_DAMPEN;
     }
     rate *= 1.0 + morale * MORALE_RATE_STEP;
+    rate *= weather_chance_mult(&ctx.weather);
     roll(rng, 1000) < rate.max(0.0) as u32
+}
+
+/// Chance multiplier for the match weather. Reconstructed: heavy
+/// rain or snow scraps up play a little, gales move the long ball.
+fn weather_chance_mult(weather: &cm0102_core::MatchWeather) -> f32 {
+    let mut mult = 1.0;
+    if weather.precip >= 5 {
+        mult *= WET_CHANCE_DAMPEN;
+    }
+    if weather.wind >= 4 {
+        mult *= GALE_CHANCE_DAMPEN;
+    }
+    mult
 }
 
 /// Average morale of a starting eleven, 0 when empty.
@@ -435,15 +608,19 @@ fn bound(player: &MatchPlayer, index: usize) -> u32 {
 }
 
 /// Book a player, weighted by dirtiness and aggression. A second
-/// yellow — or a straight red — dismisses them.
+/// yellow — or a straight red — dismisses them. Strict referees
+/// reach for the pocket more, lenient ones wave play on.
 fn maybe_book(
     rng: &mut ChaCha8Rng,
     side: &mut Side,
     home: bool,
     minute: u32,
+    strictness: u8,
     events: &mut Vec<MatchEvent>,
 ) {
-    if side.pitch.is_empty() || roll(rng, 1000) >= BOOKING_PER_MILLE {
+    let rate =
+        BOOKING_PER_MILLE * u32::from(strictness) / u32::from(cm0102_core::NEUTRAL_STRICTNESS);
+    if side.pitch.is_empty() || roll(rng, 1000) >= rate {
         return;
     }
     let weights: Vec<u32> = side
@@ -481,6 +658,8 @@ fn maybe_book(
             kind: EventKind::Red,
             player: name,
             other: None,
+            commentary_id: Some(if straight_red { 184 } else { 183 }),
+            distance_yards: None,
         });
     } else {
         side.pitch[index].yellow = true;
@@ -491,6 +670,8 @@ fn maybe_book(
             kind: EventKind::Yellow,
             player: name,
             other: None,
+            commentary_id: Some(185),
+            distance_yards: None,
         });
     }
 }
@@ -536,6 +717,8 @@ fn maybe_injure(
         kind: EventKind::Injury,
         player: victim.name.clone(),
         other: Some(days_out.to_string()),
+        commentary_id: Some(22),
+        distance_yards: None,
     });
     result.injuries.push(MatchInjury {
         player_id: victim.id,
@@ -551,6 +734,8 @@ fn maybe_injure(
             kind: EventKind::Sub,
             player: incoming,
             other: Some(name),
+            commentary_id: Some(407),
+            distance_yards: None,
         });
     } else {
         side.send_off(index, minute, false);
@@ -574,6 +759,8 @@ fn maybe_substitute(side: &mut Side, home: bool, minute: u32, events: &mut Vec<M
                 kind: EventKind::Sub,
                 player: incoming,
                 other: Some(outgoing),
+                commentary_id: Some(27),
+                distance_yards: None,
             });
         }
     }
@@ -587,6 +774,7 @@ fn resolve_chance(
     home: bool,
     minute: u32,
     result: &mut MatchResult,
+    played: &mut MinuteStats,
     events: &mut Vec<MatchEvent>,
 ) {
     let (attack, defend) = if home { (0, 1) } else { (1, 0) };
@@ -596,15 +784,98 @@ fn resolve_chance(
     let keeper_skill = keeper_skill(&sides[defend]);
     let shooter = sides[attack].pitch[shooter_index].player.clone();
     let distance = MIN_DISTANCE + roll(rng, DISTANCE_SPREAD);
-    let (_kind, winner) = winning_category(rng, &shooter, distance);
-    bump_shots(result, home, false);
+    let (kind, winner) = winning_category(rng, &shooter, distance);
+    sides[attack].pitch[shooter_index].shots += 1;
     let falloff = (distance * distance) as i32 / FALLOFF_DIVISOR;
     let keeper_roll = roll(rng, keeper_skill.max(1)) as i32;
     if winner as i32 + SHOT_BONUS > keeper_roll + falloff + KEEPER_BONUS {
         sides[attack].pitch[shooter_index].goals += 1;
-        score_goal(rng, sides, home, minute, &shooter.name, result, events);
+        sides[attack].pitch[shooter_index].on_target += 1;
+        bump_shots(played, home, true);
+        let (scored_home, scored_away) =
+            score_goal(rng, sides, home, minute, &shooter.name, distance, events);
+        result.home_goals += scored_home;
+        result.away_goals += scored_away;
     } else if roll(rng, 200) < winner.saturating_sub((falloff.max(0) / 3) as u32) {
-        bump_shots(result, home, true);
+        bump_shots(played, home, true);
+        sides[attack].pitch[shooter_index].on_target += 1;
+        let keeper = sides[defend]
+            .pitch
+            .first()
+            .map(|tracker| tracker.player.name.clone());
+        events.push(MatchEvent {
+            minute,
+            home,
+            kind: EventKind::ShotSaved,
+            player: shooter.name.clone(),
+            other: keeper,
+            commentary_id: Some(saved_commentary_id(distance, &kind)),
+            distance_yards: Some(distance.min(u32::from(u16::MAX)) as u16),
+        });
+    } else {
+        bump_shots(played, home, false);
+        let outcome = roll(rng, 100);
+        let (kind, id) = if outcome < WOODWORK_PERCENT {
+            let id = if roll(rng, 2) == 0 { 138 } else { 139 };
+            (EventKind::ShotWoodwork, id)
+        } else if outcome < WOODWORK_PERCENT + BLOCKED_PERCENT {
+            let id = if matches!(kind, ShotKind::Header) { 38 } else { 37 };
+            (EventKind::ShotBlocked, id)
+        } else {
+            (EventKind::ShotOffTarget, miss_commentary_id(rng, distance))
+        };
+        events.push(MatchEvent {
+            minute,
+            home,
+            kind,
+            player: shooter.name.clone(),
+            other: None,
+            commentary_id: Some(id),
+            distance_yards: Some(distance.min(u32::from(u16::MAX)) as u16),
+        });
+    }
+}
+
+/// Commentary id for a saved shot by technique and distance.
+fn saved_commentary_id(distance: u32, kind: &ShotKind) -> u16 {
+    match kind {
+        ShotKind::OneOnOne => 167,
+        ShotKind::Header => 166,
+        _ if distance > 25 => 164,
+        _ => 166,
+    }
+}
+
+/// Period whistle marker (kick-off, half/full time).
+fn whistle(minute: u32, kind: EventKind, commentary_id: u16) -> MatchEvent {
+    MatchEvent {
+        minute,
+        home: true,
+        kind,
+        player: String::new(),
+        other: None,
+        commentary_id: Some(commentary_id),
+        distance_yards: None,
+    }
+}
+
+/// Commentary id for a miss: nearer misses read closer.
+fn miss_commentary_id(rng: &mut ChaCha8Rng, distance: u32) -> u16 {
+    let near = roll(rng, 2) == 0;
+    if distance <= ONE_ON_ONE_RANGE {
+        if near {
+            134
+        } else {
+            135
+        }
+    } else if distance <= 25 {
+        if near {
+            131
+        } else {
+            132
+        }
+    } else {
+        127
     }
 }
 
@@ -664,22 +935,19 @@ fn winning_category(
     best
 }
 
-/// Record a goal, possibly turning it into an own goal.
+/// Record a goal, possibly turning it into an own goal. Returns
+/// the (home, away) goals to add: the attack always scores.
 fn score_goal(
     rng: &mut ChaCha8Rng,
     sides: &mut [Side; 2],
     home: bool,
     minute: u32,
     scorer: &str,
-    result: &mut MatchResult,
+    distance: u32,
     events: &mut Vec<MatchEvent>,
-) {
-    bump_shots(result, home, true);
-    if home {
-        result.home_goals += 1;
-    } else {
-        result.away_goals += 1;
-    }
+) -> (u32, u32) {
+    let scored = if home { (1, 0) } else { (0, 1) };
+    let yards = Some(distance.min(u32::from(u16::MAX)) as u16);
     if roll(rng, 100) < OWN_GOAL_PERCENT {
         let defend = usize::from(!home);
         let start = if sides[defend].pitch.len() > 1 { 1 } else { 0 };
@@ -694,6 +962,8 @@ fn score_goal(
                 kind: EventKind::OwnGoal,
                 player: name,
                 other: None,
+                commentary_id: Some(141),
+                distance_yards: yards,
             });
         } else {
             events.push(MatchEvent {
@@ -702,17 +972,31 @@ fn score_goal(
                 kind: EventKind::OwnGoal,
                 player: String::new(),
                 other: None,
+                commentary_id: Some(141),
+                distance_yards: yards,
             });
         }
     } else {
+        let id = if roll(rng, 100) < POST_IN_PERCENT {
+            if roll(rng, 2) == 0 {
+                565
+            } else {
+                566
+            }
+        } else {
+            191
+        };
         events.push(MatchEvent {
             minute,
             home,
             kind: EventKind::Goal,
             player: scorer.to_string(),
             other: None,
+            commentary_id: Some(id),
+            distance_yards: yards,
         });
     }
+    scored
 }
 
 /// Resolve a spot kick for a random side.
@@ -724,7 +1008,7 @@ fn resolve_penalty(
     events: &mut Vec<MatchEvent>,
 ) {
     let home = roll(rng, 2) == 0;
-    let side = usize::from(home);
+    let side = usize::from(!home);
     let Some(taker_index) = sides[side]
         .pitch
         .iter()
@@ -735,10 +1019,11 @@ fn resolve_penalty(
         return;
     };
     let taker = sides[side].pitch[taker_index].player.clone();
-    bump_shots(result, home, false);
+    sides[side].pitch[taker_index].shots += 1;
     if roll(rng, 200) < bound(&taker, ATTR_PENALTIES) + PENALTY_BONUS {
         sides[side].pitch[taker_index].goals += 1;
-        bump_shots(result, home, true);
+        sides[side].pitch[taker_index].on_target += 1;
+        bump_penalty_shot(result, minute, home, true);
         if home {
             result.home_goals += 1;
         } else {
@@ -750,32 +1035,67 @@ fn resolve_penalty(
             kind: EventKind::Penalty,
             player: taker.name.clone(),
             other: None,
+            commentary_id: Some(143),
+            distance_yards: Some(12),
         });
     } else {
         sides[side].pitch[taker_index].missed_pen = true;
+        bump_penalty_shot(result, minute, home, false);
         events.push(MatchEvent {
             minute,
             home,
             kind: EventKind::MissedPenalty,
             player: taker.name.clone(),
             other: None,
+            commentary_id: Some(142),
+            distance_yards: Some(12),
         });
     }
 }
 
-/// Count a shot (and optionally on target) for a side.
-fn bump_shots(result: &mut MatchResult, home: bool, on_target: bool) {
-    if home {
-        result.stats.home_shots += 1;
-        if on_target {
-            result.stats.home_on_target += 1;
-        }
-    } else {
-        result.stats.away_shots += 1;
-        if on_target {
-            result.stats.away_on_target += 1;
-        }
+/// Count a shot (and optionally on target) for a side in the
+/// current minute.
+fn bump_shots(played: &mut MinuteStats, home: bool, on_target: bool) {
+    let acc = if home { &mut played.home } else { &mut played.away };
+    acc.shots += 1;
+    if on_target {
+        acc.on_target += 1;
     }
+}
+
+/// Count a retroactive penalty shot in its minute of the timeline.
+fn bump_penalty_shot(result: &mut MatchResult, minute: u32, home: bool, on_target: bool) {
+    let index = minute.saturating_sub(1) as usize;
+    if let Some(played) = result.timeline.get_mut(index) {
+        bump_shots(played, home, on_target);
+    }
+}
+
+/// Full-time team counts from the timeline: one source of truth,
+/// so live prefixes always agree with the final block.
+fn fold_timeline(timeline: &[MinuteStats]) -> MatchStats {
+    let mut stats = MatchStats::default();
+    for played in timeline {
+        stats.home_shots += u32::from(played.home.shots);
+        stats.away_shots += u32::from(played.away.shots);
+        stats.home_on_target += u32::from(played.home.on_target);
+        stats.away_on_target += u32::from(played.away.on_target);
+        stats.home_corners += u32::from(played.home.corners);
+        stats.away_corners += u32::from(played.away.corners);
+        stats.home_free_kicks += u32::from(played.home.free_kicks);
+        stats.away_free_kicks += u32::from(played.away.free_kicks);
+        stats.home_throw_ins += u32::from(played.home.throw_ins);
+        stats.away_throw_ins += u32::from(played.away.throw_ins);
+        stats.home_offsides += u32::from(played.home.offsides);
+        stats.away_offsides += u32::from(played.away.offsides);
+        stats.home_passes += u32::from(played.home.passes);
+        stats.away_passes += u32::from(played.away.passes);
+        stats.home_tackles += u32::from(played.home.tackles);
+        stats.away_tackles += u32::from(played.away.tackles);
+        stats.home_headers += u32::from(played.home.headers);
+        stats.away_headers += u32::from(played.away.headers);
+    }
+    stats
 }
 
 /// Rate one player from their recorded match events.
@@ -809,9 +1129,17 @@ fn rate(tracker: &Tracker, side: &Side, home: bool, minutes: u32) -> cm0102_core
             .unwrap_or(minutes)
             .saturating_sub(tracker.on_minute)
             .min(120) as u8,
+        on_minute: tracker.on_minute.min(120) as u8,
         goals: tracker.goals,
         yellow: tracker.yellow,
         red: tracker.red,
+        shots: tracker.shots,
+        on_target: tracker.on_target,
+        tackles: tracker.tackles,
+        passes: tracker.passes,
+        headers: tracker.headers,
+        interceptions: tracker.interceptions,
+        offsides: tracker.offsides,
     }
 }
 
@@ -826,7 +1154,7 @@ fn is_defender(player: &MatchPlayer) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cm0102_core::GameDate;
+    use cm0102_core::{GameDate, PlayerRating};
 
     fn player(name: &str, finishing: u8) -> MatchPlayer {
         let mut attributes = vec![10u8; 54];
@@ -879,6 +1207,8 @@ mod tests {
             home_men_behind_ball: false,
             away_men_behind_ball: false,
             extra_time_if_level: false,
+            weather: cm0102_core::MatchWeather::default(),
+            referee: cm0102_core::Referee::default(),
         }
     }
 
@@ -912,6 +1242,155 @@ mod tests {
             goal_events(&result) as u32,
             result.home_goals + result.away_goals
         );
+    }
+
+    /// One timeline entry per minute played, regulation and extra
+    /// time alike.
+    #[test]
+    fn timeline_covers_every_minute() {
+        let engine = SimulationEngine;
+        for seed in 0..20 {
+            let result = engine.simulate(&context(seed));
+            assert!((93..=97).contains(&result.timeline.len()), "{}", result.timeline.len());
+            let mut ctx = context(seed);
+            ctx.extra_time_if_level = true;
+            let cup = engine.simulate(&ctx);
+            if cup.shootout.is_some() || cup.events.iter().any(|e| e.minute > 96) {
+                assert!(cup.timeline.len() >= result.timeline.len());
+            }
+        }
+    }
+
+    /// Per-player counters sum exactly to the team block: every
+    /// credit has one home.
+    #[test]
+    fn player_counters_sum_to_team_block() {
+        let engine = SimulationEngine;
+        for seed in 0..30 {
+            let result = engine.simulate(&context(seed));
+            for home in [true, false] {
+                let side: Vec<_> = result.ratings.iter().filter(|r| r.home == home).collect();
+                let sum = |get: fn(&&PlayerRating) -> u16| -> u32 {
+                    side.iter().map(|r| u32::from(get(r))).sum()
+                };
+                let stats = result.stats;
+                let (shots, on_target, tackles, passes, headers, offsides) = if home {
+                    (stats.home_shots, stats.home_on_target, stats.home_tackles, stats.home_passes, stats.home_headers, stats.home_offsides)
+                } else {
+                    (stats.away_shots, stats.away_on_target, stats.away_tackles, stats.away_passes, stats.away_headers, stats.away_offsides)
+                };
+                assert_eq!(sum(|r| r.shots), shots, "seed {seed}");
+                assert_eq!(sum(|r| r.on_target), on_target, "seed {seed}");
+                assert_eq!(sum(|r| r.tackles), tackles, "seed {seed}");
+                assert_eq!(sum(|r| r.passes), passes, "seed {seed}");
+                assert_eq!(sum(|r| r.headers), headers, "seed {seed}");
+                assert_eq!(sum(|r| r.offsides), offsides, "seed {seed}");
+            }
+        }
+    }
+
+    /// Ambient totals sit in plausible football ranges.
+    #[test]
+    fn ambient_totals_are_plausible() {
+        let engine = SimulationEngine;
+        let (mut passes, mut tackles, mut corners, mut fk, mut offs, mut throws, mut headers) =
+            (0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
+        let games = 100u32;
+        for seed in 0..u64::from(games) {
+            let stats = engine.simulate(&context(seed)).stats;
+            passes += stats.home_passes + stats.away_passes;
+            tackles += stats.home_tackles + stats.away_tackles;
+            corners += stats.home_corners + stats.away_corners;
+            fk += stats.home_free_kicks + stats.away_free_kicks;
+            offs += stats.home_offsides + stats.away_offsides;
+            throws += stats.home_throw_ins + stats.away_throw_ins;
+            headers += stats.home_headers + stats.away_headers;
+        }
+        let avg = |total: u32| f64::from(total) / f64::from(games);
+        assert!((600.0..=1200.0).contains(&avg(passes)), "passes {}", avg(passes));
+        assert!((20.0..=60.0).contains(&avg(tackles)), "tackles {}", avg(tackles));
+        assert!((4.0..=20.0).contains(&avg(corners)), "corners {}", avg(corners));
+        assert!((10.0..=45.0).contains(&avg(fk)), "fk {}", avg(fk));
+        assert!(avg(offs) <= 10.0, "offsides {}", avg(offs));
+        assert!((20.0..=70.0).contains(&avg(throws)), "throw-ins {}", avg(throws));
+        assert!((10.0..=60.0).contains(&avg(headers)), "headers {}", avg(headers));
+    }
+
+    /// Every emitted commentary id resolves in the built-in pack,
+    /// and shot incidents (saves, misses, woodwork, blocks) occur.
+    #[test]
+    fn commentary_ids_resolve_in_builtin_pack() {
+        use crate::commentary::CommentaryPack;
+        let engine = SimulationEngine;
+        let pack = CommentaryPack::builtin().expect("builtin parses");
+        let mut shots = 0;
+        for seed in 0..100 {
+            let result = engine.simulate(&context(seed));
+            for event in &result.events {
+                let Some(id) = event.commentary_id else {
+                    panic!("missing commentary id: {event:?}");
+                };
+                assert!(pack.event(id).is_some(), "unknown id {id}: {event:?}");
+                if matches!(
+                    event.kind,
+                    EventKind::ShotSaved
+                        | EventKind::ShotOffTarget
+                        | EventKind::ShotWoodwork
+                        | EventKind::ShotBlocked
+                ) {
+                    shots += 1;
+                }
+            }
+        }
+        assert!(shots > 100, "{shots}");
+    }
+
+    /// Side prefix of test elevens (`Home`/`HSub` vs `Away`/`ASub`).
+    fn side_prefix(home: bool, name: &str) -> bool {
+        if home {
+            name.starts_with("Home") || name.starts_with("HSub")
+        } else {
+            name.starts_with("Away") || name.starts_with("ASub")
+        }
+    }
+
+    /// Penalty takers and injured players belong to the incident's
+    /// side: guards the home/away index wiring.
+    #[test]
+    fn incidents_credit_the_right_side() {
+        let engine = SimulationEngine;
+        let (mut pens, mut injuries) = (0, 0);
+        for seed in 0..200 {
+            let result = engine.simulate(&context(seed));
+            for event in &result.events {
+                if matches!(
+                    event.kind,
+                    EventKind::Penalty | EventKind::MissedPenalty
+                ) {
+                    assert!(side_prefix(event.home, &event.player), "{event:?}");
+                    pens += 1;
+                }
+            }
+            for injury in &result.injuries {
+                assert!(side_prefix(injury.home, &injury.name), "{injury:?}");
+                injuries += 1;
+            }
+        }
+        assert!(pens > 0 && injuries > 0, "{pens} pens, {injuries} injuries");
+    }
+
+    /// Every goal was a shot on target: single counting, no double
+    /// bumps.
+    #[test]
+    fn goals_never_exceed_shots_on_target() {
+        let engine = SimulationEngine;
+        for seed in 0..100 {
+            let result = engine.simulate(&context(seed));
+            assert!(result.home_goals <= result.stats.home_on_target);
+            assert!(result.away_goals <= result.stats.away_on_target);
+            assert!(result.stats.home_on_target <= result.stats.home_shots);
+            assert!(result.stats.away_on_target <= result.stats.away_shots);
+        }
     }
 
     /// The first half ends at 45 plus one or two stoppage minutes.
@@ -1126,6 +1605,64 @@ mod tests {
             200,
         );
         assert!(attacking > defensive + 20, "{attacking} vs {defensive}");
+    }
+
+    /// The report carries the weather it was played in.
+    #[test]
+    fn result_carries_match_weather() {
+        let engine = SimulationEngine;
+        let mut ctx = context(7);
+        ctx.weather = cm0102_core::MatchWeather {
+            wind: 4,
+            precip: 9,
+            warmth: 0,
+            pitch: cm0102_core::Pitch::Frozen,
+        };
+        let result = engine.simulate(&ctx);
+        assert_eq!(result.weather, ctx.weather);
+    }
+
+    /// Storms scrap up play: fewer goals than calm dry days.
+    #[test]
+    fn storms_damp_chance_creation() {
+        let storm = |ctx: &mut MatchContext| {
+            ctx.weather = cm0102_core::MatchWeather {
+                wind: 4,
+                precip: 5,
+                warmth: 3,
+                pitch: cm0102_core::Pitch::Waterlogged,
+            };
+        };
+        let calm = total_goals(&|_| {}, true, 300);
+        let wet = total_goals(&storm, true, 300);
+        assert!(calm > wet, "{calm} vs {wet}");
+    }
+
+    /// Total cards (yellows and reds) over `seeds` matches.
+    fn total_cards(tweak: &dyn Fn(&mut MatchContext), seeds: u64) -> usize {
+        let engine = SimulationEngine;
+        (0..seeds)
+            .map(|seed| {
+                let mut ctx = context(seed);
+                tweak(&mut ctx);
+                engine
+                    .simulate(&ctx)
+                    .events
+                    .iter()
+                    .filter(|event| {
+                        matches!(event.kind, EventKind::Yellow | EventKind::Red)
+                    })
+                    .count()
+            })
+            .sum()
+    }
+
+    /// Strict referees book more than lenient ones.
+    #[test]
+    fn strictness_moves_bookings() {
+        let strict = total_cards(&|ctx| ctx.referee.strictness = 18, 200);
+        let lenient = total_cards(&|ctx| ctx.referee.strictness = 2, 200);
+        assert!(strict > lenient + 20, "{strict} vs {lenient}");
     }
 
     /// Sitting deep damps the opponent's scoring.
