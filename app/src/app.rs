@@ -284,6 +284,7 @@ impl OpenCmApp {
             return false;
         };
         self.state.schedule = schedule;
+        self.state.reset_season_cards();
         true
     }
 
