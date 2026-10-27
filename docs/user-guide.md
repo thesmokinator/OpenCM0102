@@ -114,12 +114,16 @@ and Tactics shows your formation and starting eleven (auto-picked
 by ability, changeable formation, click-to-swap with reserves;
 suspended and injured players are marked and cannot be picked):
 press Continue to reach the first match day — the next match is
-always shown under the top bar — open Fixtures and **Play** the
-match. The score is simulated from the relative strength of the
-two elevens and recorded, while every other due fixture is
-simulated automatically; clicking a result row opens its match
-report (events, shots, ratings). The League Table section shows
-the standings from all played results. When the season's fixtures run
+always shown under the top bar — and the game takes you into the
+match-day screen: pre-match build-up, **Play Match**, then the
+live commentary (with speed control and a half-time pause) up to
+the full-time report with stats and ratings. Other due fixtures
+are simulated automatically with a results roundup in your inbox;
+clicking a result row re-opens its match report. The League Table
+section shows the standings from all played results. Fresh news
+— reports, injuries, bans, board verdicts — interrupts Continue
+and is presented first; the News section keeps every item. When
+the season's fixtures run
 out, next year's calendar generates automatically. Every other
 section is an honest placeholder
 citing the spec in `docs/` that will back it, implemented phase

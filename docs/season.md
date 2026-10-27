@@ -87,27 +87,33 @@ become editable data with the 01/02 behaviour as default — see
 
 ## Open questions
 
-- Day-tick pipeline order, intake/regen rules, inbox flow, finance
-  formulas, job labels, friendlies: needs playtest plus
-  function-level analysis.
+- Intake/regen rules, finance formulas, job labels, friendlies:
+  needs playtest plus function-level analysis. The pipeline order
+  below is our reconstruction until the original's is observed.
 
-## Continue model (hypothesis, needs playtest)
+## Continue model (implemented)
 
-Static evidence says the day is the simulation tick (daily rolls,
-training, fitness, news) while Continue is event-driven: one press
-shows "Processing, Please Wait ..." and the game stops at the next
-date needing the manager (own match, inbox items, offer responses,
-deadlines). Holiday is a plain toggle ("Go on Holiday" / "Return
-from holiday?", no until-date): the same loop without stop
-conditions ("On Holiday (Watching)" still shows matches).
+The day is the simulation tick while Continue is event-driven: one
+press simulates days until the next date needing the manager (own
+match, inbox items, offer responses, deadlines). Each simulated
+day runs the pipeline in order — date advance, fixtures (due AI
+matches plus a results roundup), then the stop check — and fresh
+inbox items dated today stop the loop like any other event.
 
-Verify by pressing Continue repeatedly from a season start and
-logging each stop's date delta and trigger; empty days must never
-stop the loop. Implementation shape, already in `cm0102-core`
-`simulation`: `process_day()` runs the daily pipeline and
-`continue_until_event()` loops it against editable stop rules
-(`ContinueRules`: own match, inbox, offer response, deadline,
-plus a safety day cap).
+Fresh news is presented first: pressing Continue with unread
+today's items opens the news queue instead of advancing. Match
+days enter the match-day screen (pre-match, live commentary with
+a half-time pause, full-time report); the match cannot be skipped
+— unplayed fixtures keep stopping Continue until played — and the
+Continue button hides until full time. Holiday runs the same
+daily pipeline seven days without stops, with the assistant
+playing due matches.
+
+Implementation shape, in `cm0102-core` `simulation` plus the app:
+`process_day()` advances one day, the app simulates the day's
+world and pushes news, and `stops_for()` matches the day against
+the editable stop rules (`ContinueRules`: own match, inbox, offer
+response, deadline, plus a safety day cap).
 
 ## Season rollover (implemented)
 
