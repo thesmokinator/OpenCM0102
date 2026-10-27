@@ -40,8 +40,13 @@ user ISO → ISO 9660 reader → InstallShield cabinet → .dat parsers
 ## Core model
 
 - `data.rs`: `Club`, `Player` (54 attributes in `ATTRIBUTE_NAMES`
-  order), `Nation`, `Manager`.
-- `calendar.rs`: `GameDate`; the season starts 1 July 2001.
+  order), `Nation`, `Official` (with 0-20 strictness), `Manager`.
+- `calendar.rs`: `GameDate` with day-of-year arithmetic; the
+  season starts 1 July 2001.
+- `weather.rs`: `weather.cfg` reader (44 climate zones), match
+  weather rolls, pitch states, postponement calls.
+- `crowd.rs`: attendance from competition reputation, weather
+  and fixture seed.
 - `game_state.rs`: `GameState` (date, managed club, manager,
   season schedule) and the versioned native save envelope
   `SavedCareer`.
@@ -50,8 +55,22 @@ user ISO → ISO 9660 reader → InstallShield cabinet → .dat parsers
 - `simulation.rs`: `process_day()` plus event-driven
   `continue_until_event()` against editable `ContinueRules`.
 - `traits.rs`: `DataProvider` (read access to the database),
-  `MatchEngine` (`simulate` must be deterministic per seed), and
-  the shared `CoreError` (`NotFound` vs `Storage`).
+  `MatchEngine` (`simulate` must be deterministic per seed),
+  `MatchContext`/`MatchResult` (weather, referee, attendance,
+  per-minute stat timeline), and the shared `CoreError`
+  (`NotFound` vs `Storage`).
+
+## Match engine
+
+- `lib.rs`: the `SimulationEngine`: chance/scorer/penalty/
+  own-goal resolution, cards scaled by referee strictness,
+  subs, injuries, ambient per-minute stats folded into one
+  source of truth, all deterministic per fixture seed.
+- `commentary.rs`: `events_eng.cfg` format reader and renderer
+  (variants, probabilities, token filling, display holds);
+  `data/commentary_en.cfg` is our own built-in pack — the
+  original texts are never bundled, only read from the
+  player's Data directory when pointed at it.
 
 ## Application screens
 
@@ -62,9 +81,13 @@ SetupWizard (hub) → NewCareer / LoadCareer → Game → Menu → hub
      ↓ GameSettings / Credits / Tools (DataExplorer, DatabaseEditor)
 ```
 
-The hub shell (banner plus content) owns every screen except Game;
-the game shell (section sidebar, top bar, Continue bar) owns Game
-alone, with the Menu submenu as its only way out.
+The hub shell (banner plus scrollable content, or the full-bleed
+splash before any data exists) owns every screen except Game; the
+game shell (fixed info headerbar, scrollable center, fixed action
+footerbar) owns Game alone, with the Menu submenu as its only way
+out. The footer shows one primary action per match phase (Continue,
+Play Match, Start Second Half, Back); match days keep a fixed
+scoreboard with internally scrolling content.
 
 - The ISO import runs on a background thread; the UI polls progress
   events and stays responsive. The remembered ISO position
@@ -78,8 +101,18 @@ alone, with the Menu submenu as its only way out.
   manager → nationality → club → save → start, persisted through
   the native saves documented in [saves.md](saves.md). Starting
   or loading a career opens the main-menu shell (`app/shell.rs`):
-  sidebar sections plus a top bar (manager, club, date,
-  Continue/Holiday/Save), 800×600 like the original.
+  sidebar sections, info headerbar (manager, club, date, next
+  match, Menu with Save) and action footerbar (Holiday,
+  Continue). Window is 1024×720, minimum 960×640.
+- The match day (`app/matchday.rs`) pre-simulates the fixture at
+  kick-off, then reveals it in phases (pre-match, live with
+  Medium commentary pacing, half-time pause, full-time report)
+  over a broadcast scoreboard with animated goal/red-card
+  banners. Speed is display-only; it never changes the result.
+- The theme (`app/theme.rs`) owns the dark palette, type scale
+  and shared components (cards, pills, primary buttons); the
+  splash (`assets/splash-pixel-stadium.png`, our own pixel art)
+  is the full-bleed first-launch backdrop.
 - The database editor (`app/editor.rs`) is a generic read-only
   table browser over `game.db`.
 
@@ -104,5 +137,5 @@ target (see [versions.md](versions.md)); the engines only read them.
   cover; the workspace gate is `cargo build`, `cargo test` and
   `cargo clippy -- -D warnings`.
 - Behaviour of the original game is specified in `docs/` before it
-  is implemented; placeholders (e.g. the current match engine) are
-  declared as such in code and docs, never presented as faithful.
+  is implemented; placeholders are declared as such in code and
+  docs, never presented as faithful.

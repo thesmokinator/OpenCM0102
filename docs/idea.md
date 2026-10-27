@@ -70,8 +70,8 @@ TASK 7: Saves - JSON + sqlite snapshot
 
 - [x] Picks ISO image, imports to SQLite
 - [x] Shows Arsenal 01/02 squad
-- [ ] Continue 10 times updates table
-- [ ] View Match shows "12' Henry scores!"
+- [x] Continue 10 times updates table
+- [x] View Match shows "12' Henry scores!"
 - [x] Runs natively Win/Mac/Linux - no Wine
 - [x] No original files bundled
 

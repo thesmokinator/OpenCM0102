@@ -15,31 +15,38 @@ How to install, import your data and play OpenCM0102.
 
 ## Layout
 
-The window follows three phases. Setup and hub share a chromeless
-shell (slim banner plus content, no sidebar): the hub shows game
+The window follows three phases. Setup and hub share a slim shell
+(banner plus scrollable content, no sidebar): the hub shows game
 actions, while developer utilities (Data Explorer, Database
-Editor) and Disconnect live in a separate Tools section. Once a
-career starts, the game shell takes over: section sidebar on the
-left, manager/club/date bar on top, Continue bar at the bottom.
-The only ways out of a game are the Menu submenu (back to the hub,
-exit with confirmation) — tools never show while playing. The
-default window is 800×600 and stays resizable.
+Editor) and Disconnect live in a separate Tools section. Before
+any data exists, a full-bleed splash (our own pixel art) replaces
+banner and hub. Once a career starts, the game shell takes over:
+fixed info headerbar on top (manager, club, date, next match,
+Menu), scrollable center with the section sidebar on the left,
+and a fixed action footerbar at the bottom with one primary
+action per phase (Continue, Play Match, Start Second Half, Back).
+The only ways out of a game are the Menu submenu (Save game, back
+to the hub, exit with confirmation) — tools never show while
+playing. The default window is 1024×720 (minimum 960×640) and
+stays resizable.
 
 ## Setup Game hub
 
-Every launch lands on the Setup Game hub. Its readiness panel shows
-the two states the app needs: the **ISO image** (not selected, the
-remembered path, or missing when the file moved away) and the
-**database** (ready with club/player counts, or not imported). New
-and restored careers unlock only when the database is ready; with a
-career active, **Return to game** jumps back into it.
+Once data exists, every launch lands on the Setup Game hub (the
+very first launch shows the splash instead). Its readiness panel
+shows the two states the app needs: the **ISO image** (not
+selected, the remembered path, or missing when the file moved
+away) and the **database** (ready with club/player counts, or not
+imported). New and restored careers unlock only when the database
+is ready; with a career active, **Return to game** jumps back
+into it.
 
 ## First launch: importing your data
 
-1. Start OpenCM0102. The Setup Game hub asks for the ISO image.
-2. Pick the `.iso` file. The import runs in the background (reading
-   the disc, extracting the game data, building the database) while
-   the window stays responsive.
+1. Start OpenCM0102. The splash screen asks for the ISO image.
+2. Pick the `.iso` file, then Import. The import runs in the
+   background (reading the disc, extracting the game data,
+   building the database) while the window stays responsive.
 3. When the import finishes, the Setup Game grid unlocks: Start New
    Game, Restore Saved Game, Delete Saved Game, Game Settings and
    Game Credits (with project links). One start mode only — there
@@ -99,12 +106,14 @@ menu.
 ## Main menu
 
 The main menu mirrors the original game's main screen: a sidebar
-with one section per area of the game, a top bar showing the
-manager, the club and the date, with **Holiday** (interim: a fixed
-7-day jump) and **Save game** (re-saves the active file), and a
-bottom action bar with **Continue**, which simulates forward to
-the next date needing you (your club's match days today; a safety
-cap bounds each press) and reports why it stopped.
+with one section per area of the game, a headerbar showing the
+manager, the club, the date and the next match (with a Match Day
+shortcut when due), and a bottom action bar with **Holiday**
+(interim: a fixed 7-day jump) and **Continue**, which simulates
+forward to the next date needing you (your club's match days
+today; a safety cap bounds each press) and reports why it
+stopped. **Save game** lives in the header Menu, which also holds
+Back to setup and Exit.
 
 Sections: Squad, Tactics, Training, Fixtures, League Table,
 Transfers, Finances & Info, Board, Staff, Search, News, History,
@@ -114,11 +123,15 @@ and Tactics shows your formation and starting eleven (auto-picked
 by ability, changeable formation, click-to-swap with reserves;
 suspended and injured players are marked and cannot be picked):
 press Continue to reach the first match day — the next match is
-always shown under the top bar — and the game takes you into the
-match-day screen: pre-match build-up (venue, weather and pitch,
-referee with his strictness tag), **Play Match**, then the
-live commentary (with speed control and a half-time pause) up to
-the full-time report with attendance, stats and ratings.
+always shown in the headerbar — and the game takes you into the
+match-day screen over a broadcast scoreboard. Pre-match build-up
+shows venue, weather and pitch, the referee with his strictness
+tag, and your eleven; **Play Match** runs from the footer, then
+the live commentary plays (speed control in the footer, from Very
+Slow to Very Fast around the Medium cfg timing; goals and red
+cards fire animated banners) with a half-time pause up to the
+full-time report with attendance, stats and ratings. Speed only
+paces the reveal — the result is fixed at kick-off.
 Frozen or waterlogged pitches can postpone a fixture by a week,
 with a news item telling you. Other due fixtures
 are simulated automatically with a results roundup in your inbox;
