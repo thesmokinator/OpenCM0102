@@ -14,4 +14,3 @@ description = "Match simulation engines for OpenCM0102"
 cm0102-core = { path = "../cm0102-core" }
 rand = "0.9"
 rand_chacha = "0.9"
-rand_distr = "0.5"

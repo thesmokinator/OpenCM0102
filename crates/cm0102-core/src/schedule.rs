@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use crate::calendar::GameDate;
 use crate::data::Club;
 use crate::simulation::{DayEvents, DayEventSource};
+use crate::traits::MatchResult;
 
 /// Byte-87 slots that are minnow buckets, not simulated leagues
 /// (distribution verified on the 3.9.60 data — see
@@ -108,7 +109,7 @@ impl TableRow {
 }
 
 /// One dated fixture between two clubs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fixture {
     /// Day the match is played.
     pub date: GameDate,
@@ -121,6 +122,9 @@ pub struct Fixture {
     /// Final score once the match has been played.
     #[serde(default)]
     pub result: Option<FixtureResult>,
+    /// Full match report (events, ratings, stats) once played.
+    #[serde(default)]
+    pub report: Option<MatchResult>,
 }
 
 impl Fixture {
@@ -193,6 +197,7 @@ impl Schedule {
                         away_club_id,
                         competition_id,
                         result: None,
+                        report: None,
                     });
                 }
             }
@@ -244,15 +249,16 @@ impl Schedule {
         })
     }
 
-    /// Record the final score of one fixture. Returns false when no
-    /// unplayed fixture matches (wrong day, wrong clubs, or already
-    /// played), leaving the schedule untouched.
+    /// Record the final score and report of one fixture. Returns
+    /// false when no unplayed fixture matches (wrong day, wrong
+    /// clubs, or already played), leaving the schedule untouched.
     pub fn record_result(
         &mut self,
         date: GameDate,
         home_club_id: u32,
         away_club_id: u32,
         result: FixtureResult,
+        report: Option<MatchResult>,
     ) -> bool {
         let Some(fixture) = self.fixtures.iter_mut().find(|fixture| {
             fixture.date == date
@@ -263,6 +269,7 @@ impl Schedule {
             return false;
         };
         fixture.result = Some(result);
+        fixture.report = report;
         true
     }
 
@@ -577,10 +584,10 @@ mod tests {
             home_goals: 2,
             away_goals: 1,
         };
-        assert!(schedule.record_result(GameDate::SEASON_START, 1, 2, score));
-        assert!(!schedule.record_result(GameDate::SEASON_START, 1, 2, score));
-        assert!(!schedule.record_result(GameDate::SEASON_START, 2, 1, score));
-        assert!(!schedule.record_result(GameDate::new(2001, 7, 2), 1, 2, score));
+        assert!(schedule.record_result(GameDate::SEASON_START, 1, 2, score, None));
+        assert!(!schedule.record_result(GameDate::SEASON_START, 1, 2, score, None));
+        assert!(!schedule.record_result(GameDate::SEASON_START, 2, 1, score, None));
+        assert!(!schedule.record_result(GameDate::new(2001, 7, 2), 1, 2, score, None));
         assert_eq!(schedule.fixtures[0].result, Some(score));
     }
 
@@ -600,7 +607,8 @@ mod tests {
             FixtureResult {
                 home_goals: 0,
                 away_goals: 0,
-            }
+            },
+            None
         ));
         assert!(!schedule.events_for(match_day, Some(1)).own_match);
     }
@@ -664,6 +672,7 @@ mod tests {
                 home_goals: hs,
                 away_goals: as_,
             }),
+            report: None,
         };
         let fixtures = vec![
             played(1, 2, 2, 0),
@@ -674,6 +683,7 @@ mod tests {
                 away_club_id: 3,
                 competition_id: 7,
                 result: None,
+                report: None,
             },
             played(1, 9, 5, 0),
         ];

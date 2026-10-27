@@ -17,8 +17,17 @@ pub mod tactics;
 pub mod traits;
 
 pub use calendar::GameDate;
-pub use data::{Club, Manager, Nation, Player, ATTRIBUTE_NAMES};
-pub use game_state::{GameState, SavedCareer};
+pub use data::{
+    Club, Manager, Nation, Player, ATTRIBUTE_NAMES, ATTR_AGGRESSION, ATTR_ANTICIPATION,
+    ATTR_ATTACKER, ATTR_DECISIONS, ATTR_DEFENDER, ATTR_DIRTINESS, ATTR_DM, ATTR_DRIBBLING,
+    ATTR_FINISHING, ATTR_GOALKEEPER, ATTR_HANDLING, ATTR_HEADING, ATTR_INJURY_PRONENESS,
+    ATTR_JUMPING, ATTR_LONG_SHOTS, ATTR_ONE_ON_ONES, ATTR_PACE, ATTR_PASSING, ATTR_PENALTIES,
+    ATTR_POSITIONING, ATTR_REFLEXES, ATTR_SWEEPER, ATTR_TECHNIQUE,
+};
+pub use game_state::{
+    GameState, SavedCareer, SECOND_YELLOW_BAN, STRAIGHT_RED_BAN, YELLOW_COUNT_BAN,
+    YELLOWS_FOR_BAN,
+};
 pub use schedule::{
     Fixture, FixtureResult, Schedule, TableRow, TableRules, DEFAULT_LEGS, DEFAULT_ROUND_SPACING,
     NON_LEAGUE_SLOTS, first_round_for_year,
@@ -31,4 +40,7 @@ pub use simulation::{
     ContinueOutcome, ContinueRules, DayEvents, DayEventSource, NoEvents, StopReason,
     continue_until_event, process_day,
 };
-pub use traits::{DataProvider, MatchContext, MatchEngine, MatchResult};
+pub use traits::{
+    DataProvider, MatchContext, MatchEngine, MatchInjury, MatchPlayer, MatchResult, MatchStats,
+    PlayerRating, Shootout,
+};

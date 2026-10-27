@@ -4,11 +4,22 @@
 //! Top-level mutable game state owned by the application.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::calendar::GameDate;
 use crate::data::Manager;
 use crate::schedule::Schedule;
 use crate::tactics::TeamTactics;
+use crate::traits::MatchResult;
+
+/// Matches banned after a second yellow (provisional).
+pub const SECOND_YELLOW_BAN: u32 = 1;
+/// Matches banned after a straight red (provisional).
+pub const STRAIGHT_RED_BAN: u32 = 3;
+/// Season yellows triggering a ban (provisional).
+pub const YELLOWS_FOR_BAN: u8 = 5;
+/// Matches banned on reaching the yellow threshold (provisional).
+pub const YELLOW_COUNT_BAN: u32 = 1;
 
 /// The whole simulated world at a point in time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +40,15 @@ pub struct GameState {
     /// lineup from the squad when none is stored.
     #[serde(default)]
     pub tactics: TeamTactics,
+    /// Matches remaining banned, by player id.
+    #[serde(default)]
+    pub suspensions: HashMap<u32, u32>,
+    /// Date the player is fit again, by player id.
+    #[serde(default)]
+    pub injuries: HashMap<u32, GameDate>,
+    /// Season yellow-card counts, by player id.
+    #[serde(default)]
+    pub yellow_counts: HashMap<u32, u8>,
 }
 
 impl GameState {
@@ -40,7 +60,73 @@ impl GameState {
             manager: None,
             schedule: Schedule::default(),
             tactics: TeamTactics::default(),
+            suspensions: HashMap::new(),
+            injuries: HashMap::new(),
+            yellow_counts: HashMap::new(),
         }
+    }
+
+    /// True when the player may play today: not banned and fit.
+    pub fn is_available(&self, player_id: u32) -> bool {
+        if self.suspensions.get(&player_id).is_some_and(|left| *left > 0) {
+            return false;
+        }
+        self.injuries
+            .get(&player_id)
+            .map_or(true, |fit| self.current_date >= *fit)
+    }
+
+    /// Apply a match report to season discipline: bans from reds,
+    /// yellow accumulation, and injury layoffs from today.
+    pub fn apply_match_report(&mut self, report: &MatchResult) {
+        for rating in &report.ratings {
+            if rating.red {
+                let matches = if rating.yellow {
+                    SECOND_YELLOW_BAN
+                } else {
+                    STRAIGHT_RED_BAN
+                };
+                self.suspensions.insert(rating.player_id, matches);
+            } else if rating.yellow {
+                let count = self
+                    .yellow_counts
+                    .get(&rating.player_id)
+                    .copied()
+                    .unwrap_or(0)
+                    + 1;
+                if count >= YELLOWS_FOR_BAN {
+                    self.suspensions.insert(rating.player_id, YELLOW_COUNT_BAN);
+                    self.yellow_counts.remove(&rating.player_id);
+                } else {
+                    self.yellow_counts.insert(rating.player_id, count);
+                }
+            }
+        }
+        for injury in &report.injuries {
+            let fit = self.current_date.add_days(injury.days_out);
+            self.injuries
+                .entry(injury.player_id)
+                .and_modify(|date| *date = (*date).max(fit))
+                .or_insert(fit);
+        }
+    }
+
+    /// Serve one suspension match for the listed players, dropping
+    /// bans that reach zero.
+    pub fn serve_suspension_match(&mut self, player_ids: &[u32]) {
+        for id in player_ids {
+            if let Some(left) = self.suspensions.get_mut(id) {
+                *left = left.saturating_sub(1);
+                if *left == 0 {
+                    self.suspensions.remove(id);
+                }
+            }
+        }
+    }
+
+    /// Reset season yellow counts for a new season. Bans carry over.
+    pub fn reset_season_cards(&mut self) {
+        self.yellow_counts.clear();
     }
 
     /// Start a career: the manager takes charge of `club_id` on the
@@ -150,6 +236,89 @@ mod tests {
             restored.state.manager.expect("manager").full_name(),
             "Arrigo Sacchi"
         );
+    }
+
+    /// Reports ban reds, accumulate yellows and sideline injuries.
+    #[test]
+    fn match_reports_drive_discipline() {
+        use crate::traits::{MatchInjury, MatchStats, PlayerRating};
+        let mut state = GameState::new_season();
+        let report = MatchResult {
+            home_goals: 1,
+            away_goals: 0,
+            events: Vec::new(),
+            stats: MatchStats::default(),
+            ratings: vec![
+                PlayerRating {
+                    player_id: 1,
+                    name: "Sent Off".to_string(),
+                    home: true,
+                    rating: 55,
+                    minutes: 60,
+                    goals: 0,
+                    yellow: false,
+                    red: true,
+                },
+                PlayerRating {
+                    player_id: 2,
+                    name: "Booked".to_string(),
+                    home: true,
+                    rating: 68,
+                    minutes: 90,
+                    goals: 0,
+                    yellow: true,
+                    red: false,
+                },
+            ],
+            shootout: None,
+            injuries: vec![MatchInjury {
+                player_id: 3,
+                name: "Crocked".to_string(),
+                home: true,
+                days_out: 7,
+            }],
+        };
+        state.apply_match_report(&report);
+        assert_eq!(state.suspensions.get(&1), Some(&STRAIGHT_RED_BAN));
+        assert_eq!(state.yellow_counts.get(&2), Some(&1));
+        assert!(!state.is_available(1));
+        assert!(state.is_available(2));
+        assert!(!state.is_available(3));
+        assert_eq!(
+            state.injuries.get(&3),
+            Some(&GameDate::new(2001, 7, 8))
+        );
+        state.serve_suspension_match(&[1, 2]);
+        assert_eq!(state.suspensions.get(&1), Some(&(STRAIGHT_RED_BAN - 1)));
+    }
+
+    /// Five yellows earn a ban and reset the count.
+    #[test]
+    fn yellow_accumulation_bans() {
+        use crate::traits::{MatchStats, PlayerRating};
+        let mut state = GameState::new_season();
+        for _ in 0..YELLOWS_FOR_BAN {
+            state.apply_match_report(&MatchResult {
+                home_goals: 0,
+                away_goals: 0,
+                events: Vec::new(),
+                stats: MatchStats::default(),
+                ratings: vec![PlayerRating {
+                    player_id: 9,
+                    name: "Dirty".to_string(),
+                    home: true,
+                    rating: 65,
+                    minutes: 90,
+                    goals: 0,
+                    yellow: true,
+                    red: false,
+                }],
+                shootout: None,
+                injuries: Vec::new(),
+            });
+        }
+        assert_eq!(state.suspensions.get(&9), Some(&YELLOW_COUNT_BAN));
+        assert!(!state.yellow_counts.contains_key(&9));
     }
 
     /// Saves written before calendars existed load with an empty

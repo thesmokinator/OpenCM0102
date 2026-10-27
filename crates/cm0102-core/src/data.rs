@@ -151,6 +151,53 @@ pub const ATTRIBUTE_NAMES: [&str; 54] = [
     "Work Rate",
 ];
 
+/// Positions of widely used attributes inside [`ATTRIBUTE_NAMES`].
+pub const ATTR_GOALKEEPER: usize = 0;
+/// Sweeper positional rating.
+pub const ATTR_SWEEPER: usize = 1;
+/// Defender positional rating.
+pub const ATTR_DEFENDER: usize = 2;
+/// Defensive midfielder positional rating.
+pub const ATTR_DM: usize = 3;
+/// Attacker positional rating.
+pub const ATTR_ATTACKER: usize = 6;
+/// Aggression.
+pub const ATTR_AGGRESSION: usize = 13;
+/// Anticipation.
+pub const ATTR_ANTICIPATION: usize = 15;
+/// Decisions.
+pub const ATTR_DECISIONS: usize = 21;
+/// Dirtiness.
+pub const ATTR_DIRTINESS: usize = 22;
+/// Dribbling.
+pub const ATTR_DRIBBLING: usize = 23;
+/// Finishing.
+pub const ATTR_FINISHING: usize = 24;
+/// Handling (goalkeeper).
+pub const ATTR_HANDLING: usize = 27;
+/// Heading.
+pub const ATTR_HEADING: usize = 28;
+/// Injury proneness.
+pub const ATTR_INJURY_PRONENESS: usize = 30;
+/// Jumping.
+pub const ATTR_JUMPING: usize = 31;
+/// Long shots.
+pub const ATTR_LONG_SHOTS: usize = 34;
+/// One on ones.
+pub const ATTR_ONE_ON_ONES: usize = 38;
+/// Pace.
+pub const ATTR_PACE: usize = 39;
+/// Passing.
+pub const ATTR_PASSING: usize = 40;
+/// Penalties.
+pub const ATTR_PENALTIES: usize = 41;
+/// Positioning.
+pub const ATTR_POSITIONING: usize = 42;
+/// Reflexes (goalkeeper).
+pub const ATTR_REFLEXES: usize = 43;
+/// Technique.
+pub const ATTR_TECHNIQUE: usize = 49;
+
 #[cfg(test)]
 mod tests {
     use super::*;
