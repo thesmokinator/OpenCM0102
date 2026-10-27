@@ -21,6 +21,7 @@ cm0102-match = { path = "../crates/cm0102-match" }
 eframe = "0.31"
 fluent = "0.17"
 i18n-embed = { version = "0.16", features = ["fluent-system"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 rfd = "0.16"
 rusqlite = { version = "0.39", features = ["bundled"] }
 rust-embed = "8"

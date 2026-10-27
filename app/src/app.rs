@@ -129,6 +129,15 @@ pub struct OpenCmApp {
     shell: shell::ShellState,
     /// Exit confirmation dialog armed (in-game exits confirm).
     exit_armed: bool,
+    /// Player's game Data directory with events/weather cfg files.
+    game_data_dir: Option<PathBuf>,
+    /// Active commentary pack (built-in unless the data dir has one).
+    commentary_pack: cm0102_match::CommentaryPack,
+    /// Active climate table (built-in unless the data dir has one).
+    weather_table: cm0102_core::WeatherTable,
+    /// Splash background texture and size, decoded once from the
+    /// embedded pixel art.
+    splash_tex: Option<(egui::TextureHandle, egui::Vec2)>,
 }
 
 impl OpenCmApp {
@@ -160,9 +169,70 @@ impl OpenCmApp {
             career: career::CareerState::default(),
             shell: shell::ShellState::default(),
             exit_armed: false,
+            game_data_dir: None,
+            commentary_pack: cm0102_match::CommentaryPack::builtin()
+                .unwrap_or_default(),
+            weather_table: cm0102_core::WeatherTable::builtin(),
+            splash_tex: None,
         };
         app.restore_session();
+        app.restore_data_dir();
         app
+    }
+
+    /// Restore the game data dir (env override wins) and load its
+    /// commentary pack, falling back to built-in.
+    fn restore_data_dir(&mut self) {
+        if let Some(dir) = std::env::var_os("OPENCM0102_DATA_DIR").map(PathBuf::from) {
+            self.game_data_dir = Some(dir);
+        } else if let Some(dir) = read_game_data_dir() {
+            self.game_data_dir = Some(dir);
+        } else {
+            let local = PathBuf::from("Data");
+            if local.join("events_eng.cfg").is_file() {
+                self.game_data_dir = Some(local);
+            }
+        }
+        self.reload_commentary_pack();
+        self.reload_weather_table();
+    }
+
+    /// Load `events_eng.cfg` from the data dir when present and
+    /// valid, else keep the built-in pack.
+    fn reload_commentary_pack(&mut self) {
+        let Some(dir) = &self.game_data_dir else {
+            return;
+        };
+        let path = dir.join("events_eng.cfg");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        // Original files are Windows text: decode lossily.
+        let text = String::from_utf8_lossy(&bytes);
+        if let Ok(pack) = cm0102_match::CommentaryPack::parse(&text) {
+            if !pack.is_empty() {
+                self.commentary_pack = pack;
+            }
+        }
+    }
+
+    /// Load `weather.cfg` from the data dir when present and valid,
+    /// else keep the built-in table.
+    fn reload_weather_table(&mut self) {
+        let Some(dir) = &self.game_data_dir else {
+            return;
+        };
+        let path = dir.join("weather.cfg");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        // Original files are Windows text: decode lossily.
+        let text = String::from_utf8_lossy(&bytes);
+        if let Ok(table) = cm0102_core::WeatherTable::parse(&text) {
+            if !table.zones.is_empty() {
+                self.weather_table = table;
+            }
+        }
     }
 
     /// Reopen the imported database when a saved session exists.
@@ -675,53 +745,112 @@ impl OpenCmApp {
             // but never strand the user on a blank screen.
             self.screen = Screen::SetupWizard;
         }
-        egui::TopBottomPanel::top("banner").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("OpenCM0102");
-                ui.separator();
-                ui.label(self.screen.subtitle());
-                if importing {
+        // The splash carries its own title over full-bleed art.
+        let splash = self.screen == Screen::SetupWizard && !self.leagues_ready();
+        if !splash {
+            egui::TopBottomPanel::top("banner").show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("OpenCM0102");
                     ui.separator();
-                    ui.add(egui::Spinner::new());
-                    ui.label(&self.import_stage);
-                }
+                    ui.label(self.screen.subtitle());
+                    if importing {
+                        ui.separator();
+                        ui.add(egui::Spinner::new());
+                        ui.label(&self.import_stage);
+                    }
+                });
             });
-        });
+        }
 
-        egui::CentralPanel::default().show(ctx, |ui| match self.screen {
-            Screen::SetupWizard => self.show_setup_game(ui, importing),
-            Screen::DataExplorer => self.show_data_explorer(ui),
-            Screen::DatabaseEditor => self.show_database_editor(ui),
-            Screen::NewCareer => self.show_new_career(ui),
-            Screen::LoadCareer => self.show_load_career(ui),
-            Screen::GameSettings => self.show_game_settings(ui),
-            Screen::Credits => self.show_credits(ui),
-            Screen::Game => self.show_setup_game(ui, importing),
+        egui::CentralPanel::default().show(ctx, |ui| {
+            if splash {
+                self.show_setup_game(ui, importing);
+                return;
+            }
+            // Every hub screen scrolls: nothing can overflow.
+            egui::ScrollArea::vertical().show(ui, |ui| match self.screen {
+                Screen::SetupWizard => self.show_setup_game(ui, importing),
+                Screen::DataExplorer => self.show_data_explorer(ui),
+                Screen::DatabaseEditor => self.show_database_editor(ui),
+                Screen::NewCareer => self.show_new_career(ui),
+                Screen::LoadCareer => self.show_load_career(ui),
+                Screen::GameSettings => self.show_game_settings(ui),
+                Screen::Credits => self.show_credits(ui),
+                Screen::Game => self.show_setup_game(ui, importing),
+            });
         });
     }
 
-    /// Game shell: the main-menu screen plus the bottom Continue bar.
-    /// The only ways out are the Menu submenu and the exit dialog.
-    /// Continue hides on match days: the match must be played first.
+    /// Game shell: fixed info headerbar, scrollable center, fixed
+    /// action footerbar. The only ways out are the Menu submenu and
+    /// the exit dialog. Continue hides on match days: the match
+    /// must be played first.
     fn show_game_shell(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("game_header").show(ctx, |ui| {
+            self.show_game_header(ui);
+        });
         egui::TopBottomPanel::bottom("action_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label(&self.status);
-                if self.shell.match_day.is_none() {
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Main action bar: one primary action per phase.
+                    match self.match_phase() {
+                        matchday::MatchPhase::Hub => {
                             if ui.button(crate::i18n::t("shell-continue")).clicked() {
                                 self.advance_continue();
                             }
-                        },
-                    );
-                }
+                            if ui.button(crate::i18n::t("shell-holiday-7-days")).clicked() {
+                                self.holiday_week();
+                            }
+                        }
+                        matchday::MatchPhase::Prematch => {
+                            if crate::theme::primary_button(
+                                ui,
+                                &crate::i18n::t("matchday-play-match"),
+                            )
+                            .clicked()
+                            {
+                                self.kick_off();
+                            }
+                            if ui.button(crate::i18n::t("shell-holiday-7-days")).clicked() {
+                                self.holiday_week();
+                            }
+                        }
+                        matchday::MatchPhase::Live => {
+                            self.show_speed_combo(ui);
+                        }
+                        matchday::MatchPhase::HalfTime => {
+                            if crate::theme::primary_button(
+                                ui,
+                                &crate::i18n::t("matchday-second-half"),
+                            )
+                            .clicked()
+                            {
+                                self.start_second_half();
+                            }
+                            self.show_speed_combo(ui);
+                        }
+                        matchday::MatchPhase::FullTime => {
+                            if ui.button(crate::i18n::t("matchday-back")).clicked() {
+                                self.shell.match_day = None;
+                                self.open_news_queue();
+                            }
+                        }
+                    }
+                });
             });
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            self.show_game(ui);
+            if self.shell.match_day.is_some() {
+                // Match days own their layout (fixed scoreboard,
+                // internal scrolling feed).
+                self.show_game(ui);
+            } else {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    self.show_game(ui);
+                });
+            }
         });
         self.show_news_queue(ctx);
     }
@@ -852,12 +981,9 @@ fn role_label(job: u8) -> String {
     })
 }
 
-/// Apply the classic CM-inspired dark theme with green `#1e5631` panels.
+/// Apply the application theme (see `theme`).
 fn apply_theme(ctx: &egui::Context) {
-    let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = egui::Color32::from_rgb(0x1e, 0x56, 0x31);
-    visuals.window_fill = egui::Color32::from_rgb(0x1e, 0x56, 0x31);
-    ctx.set_visuals(visuals);
+    crate::theme::apply(ctx);
 }
 
 /// Directory holding the imported database, extracted files and the
@@ -914,6 +1040,33 @@ fn save_session(iso_path: &std::path::Path) {
 fn clear_session() {
     if let Ok(path) = session_path() {
         let _ = std::fs::remove_file(path);
+    }
+}
+
+/// Location of the saved game-data-dir file.
+fn game_data_dir_path() -> Result<PathBuf, String> {
+    Ok(data_dir()?.join("game-data-dir.txt"))
+}
+
+/// Read the saved game data dir, if any.
+fn read_game_data_dir() -> Option<PathBuf> {
+    let path = game_data_dir_path().ok()?;
+    let text = std::fs::read_to_string(path).ok()?;
+    let line = text.lines().next()?.trim();
+    if line.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(line))
+    }
+}
+
+/// Save the game data dir for the next launch.
+fn save_game_data_dir(dir: &std::path::Path) {
+    if let Ok(path) = game_data_dir_path() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, format!("{}\n", dir.display()));
     }
 }
 

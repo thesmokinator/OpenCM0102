@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use cm0102_core::{
     EventKind, Fixture, FixtureResult, GameDate, MatchContext, MatchEngine, MatchResult,
-    Mentality, NewsCategory,
+    MatchWeather, Mentality, NewsCategory, Referee,
 };
 use cm0102_match::SimulationEngine;
 
@@ -19,6 +19,35 @@ use crate::i18n::{t, tr};
 
 /// Cap on scorelines listed in one results roundup.
 const ROUNDUP_LINES: usize = 15;
+/// Days a postponed fixture moves out.
+const POSTPONE_DAYS: u32 = 7;
+/// Reputation assumed when the competition is unknown.
+const UNKNOWN_REPUTATION: i16 = 8;
+
+/// Pick one official deterministically, weighted by reputation so
+/// established referees take most matches and filler rows appear
+/// rarely. Returns `None` for an empty pool.
+fn pick_official(officials: &[cm0102_core::Official], seed: u64) -> Option<&cm0102_core::Official> {
+    let total: u64 = officials.iter().map(official_weight).sum();
+    if total == 0 {
+        return None;
+    }
+    let mut draw = seed % total;
+    for official in officials {
+        let weight = official_weight(official);
+        if draw < weight {
+            return Some(official);
+        }
+        draw -= weight;
+    }
+    officials.last()
+}
+
+/// Assignment weight: reputation plus a base share so unrated
+/// officials still appear.
+fn official_weight(official: &cm0102_core::Official) -> u64 {
+    1 + official.reputation.unwrap_or(0).max(0) as u64
+}
 
 impl OpenCmApp {
     /// Simulate one world day: every due unplayed fixture not
@@ -49,6 +78,9 @@ impl OpenCmApp {
         let mut squads = HashMap::new();
         let mut roundup: Vec<(Fixture, MatchResult)> = Vec::new();
         for fixture in due {
+            if self.postpone_if_unplayable(&fixture) {
+                continue;
+            }
             if involves_managed(&fixture) {
                 let pre_susp = self.state.suspensions.clone();
                 let pre_inj = self.state.injuries.clone();
@@ -62,6 +94,107 @@ impl OpenCmApp {
         self.push_results_roundup(&roundup);
     }
 
+    /// Match weather for a fixture: the home ground's climate zone
+    /// on the fixture date, rolled from the fixture seed.
+    pub(super) fn fixture_weather(&self, fixture: &Fixture) -> MatchWeather {
+        let zone = self
+            .clubs
+            .iter()
+            .find(|club| club.id == fixture.home_club_id)
+            .and_then(|club| club.league_id)
+            .map_or(1, cm0102_core::league_zone);
+        cm0102_core::roll_weather(
+            &self.weather_table,
+            zone,
+            fixture.date.day_of_year(),
+            fixture.seed(),
+        )
+    }
+
+    /// Postpone a fixture whose pitch is unplayable, moving it a
+    /// week out and telling the manager when their club is
+    /// involved. Returns true when the fixture was postponed.
+    pub(super) fn postpone_if_unplayable(&mut self, fixture: &Fixture) -> bool {
+        let weather = self.fixture_weather(fixture);
+        if !cm0102_core::is_postponed(&weather, fixture.seed()) {
+            return false;
+        }
+        let new_date = self.state.current_date.add_days(POSTPONE_DAYS);
+        self.state.schedule.postpone(
+            fixture.date,
+            fixture.home_club_id,
+            fixture.away_club_id,
+            new_date,
+        );
+        let managed = self.state.managed_club_id;
+        let involved = managed.is_some_and(|id| {
+            fixture.home_club_id == id || fixture.away_club_id == id
+        });
+        if involved {
+            let home = self.club_display_name(fixture.home_club_id);
+            let away = self.club_display_name(fixture.away_club_id);
+            let date = new_date.to_string();
+            let reason = t(super::matchday::pitch_label_key(&weather.pitch));
+            self.state.push_news(
+                NewsCategory::Postponed,
+                tr("news-postponed-headline", &[("home", &home), ("away", &away)]),
+                tr(
+                    "news-postponed-body",
+                    &[("date", &date), ("reason", &reason)],
+                ),
+            );
+        }
+        true
+    }
+
+    /// Referee for a fixture: an official of the home nation,
+    /// picked deterministically from the fixture seed. Falls back
+    /// to a neutral unnamed referee without data.
+    pub(super) fn fixture_referee(&self, fixture: &Fixture) -> Referee {
+        let nation = self
+            .clubs
+            .iter()
+            .find(|club| club.id == fixture.home_club_id)
+            .and_then(|club| club.league_id)
+            .map(cm0102_core::league_nation)
+            .unwrap_or("England");
+        let official = self.provider.as_ref().and_then(|provider| {
+            let nations = provider.list_nations().unwrap_or_default();
+            let nation_id = nations
+                .iter()
+                .find(|candidate| candidate.name == nation)
+                .map(|candidate| candidate.id)?;
+            let officials = provider.list_officials_by_nation(nation_id).unwrap_or_default();
+            pick_official(&officials, fixture.seed()).cloned()
+        });
+        official.map_or_else(Referee::default, |official| {
+            // Zero reads as unset, not lenient: most filler rows
+            // carry it, and it would zero the booking rate.
+            let strictness = official.strictness.filter(|value| *value > 0).unwrap_or_else(|| {
+                cm0102_core::strictness_for_official(official.id)
+            });
+            Referee {
+                name: official.name.clone(),
+                strictness,
+            }
+        })
+    }
+
+    /// Attendance for a fixture from the competition's reputation
+    /// and the weather over the ground.
+    fn fixture_attendance(&self, fixture: &Fixture, weather: &MatchWeather) -> u32 {
+        let reputation = self
+            .provider
+            .as_ref()
+            .and_then(|provider| {
+                provider
+                    .competition_reputation(fixture.competition_id)
+                    .unwrap_or(None)
+            })
+            .unwrap_or(UNKNOWN_REPUTATION);
+        cm0102_core::crowd(reputation, weather, fixture.seed())
+    }
+
     /// Simulate one fixture through the match engine, serve bans,
     /// record the score and report, and apply season discipline.
     /// Used for the managed club's matches (match day, holiday).
@@ -70,11 +203,15 @@ impl OpenCmApp {
         let (away_players, away_subs) = self.match_squad(fixture.away_club_id);
         let (home_mentality, home_bus) = self.side_instructions(fixture.home_club_id);
         let (away_mentality, away_bus) = self.side_instructions(fixture.away_club_id);
+        let weather = self.fixture_weather(fixture);
+        let referee = self.fixture_referee(fixture);
         let context = MatchContext {
             home_club_id: fixture.home_club_id,
             away_club_id: fixture.away_club_id,
             date: fixture.date,
             seed: fixture.seed(),
+            weather,
+            referee,
             home_avg_ca: self.team_avg_ca(fixture.home_club_id),
             away_avg_ca: self.team_avg_ca(fixture.away_club_id),
             home_players,
@@ -88,7 +225,8 @@ impl OpenCmApp {
             // League fixtures only until cups land.
             extra_time_if_level: false,
         };
-        let outcome = SimulationEngine.simulate(&context);
+        let mut outcome = SimulationEngine.simulate(&context);
+        outcome.attendance = Some(self.fixture_attendance(fixture, &outcome.weather));
         self.serve_match_bans(fixture.home_club_id, fixture.away_club_id);
         self.state.schedule.record_result(
             fixture.date,
@@ -116,11 +254,15 @@ impl OpenCmApp {
             self.match_squad_cached(fixture.home_club_id, squads);
         let (away_players, away_subs) =
             self.match_squad_cached(fixture.away_club_id, squads);
+        let weather = self.fixture_weather(fixture);
+        let referee = self.fixture_referee(fixture);
         let context = MatchContext {
             home_club_id: fixture.home_club_id,
             away_club_id: fixture.away_club_id,
             date: fixture.date,
             seed: fixture.seed(),
+            weather,
+            referee,
             home_avg_ca: self.team_avg_ca_cached(fixture.home_club_id, strengths),
             away_avg_ca: self.team_avg_ca_cached(fixture.away_club_id, strengths),
             home_players,
@@ -134,7 +276,8 @@ impl OpenCmApp {
             // League fixtures only until cups land.
             extra_time_if_level: false,
         };
-        let outcome = SimulationEngine.simulate(&context);
+        let mut outcome = SimulationEngine.simulate(&context);
+        outcome.attendance = Some(self.fixture_attendance(fixture, &outcome.weather));
         self.serve_match_bans(fixture.home_club_id, fixture.away_club_id);
         self.state.schedule.record_result(
             fixture.date,
@@ -442,6 +585,7 @@ fn news_category_label(category: &NewsCategory) -> String {
         NewsCategory::Injury => "news-cat-injury",
         NewsCategory::Suspension => "news-cat-suspension",
         NewsCategory::Board => "news-cat-board",
+        NewsCategory::Postponed => "news-cat-postponed",
     })
 }
 
@@ -463,5 +607,36 @@ mod tests {
             board_reaction(false, 3, 1),
             ("news-board-loss-headline", "news-board-loss-body")
         );
+    }
+
+    #[test]
+    fn official_pick_is_weighted_and_deterministic() {
+        use cm0102_core::Official;
+        let pool = vec![
+            Official {
+                id: 1,
+                name: "Top Ref".to_string(),
+                nation_id: Some(61),
+                strictness: Some(12),
+                reputation: Some(99),
+            },
+            Official {
+                id: 2,
+                name: "Filler".to_string(),
+                nation_id: Some(61),
+                strictness: Some(0),
+                reputation: Some(0),
+            },
+        ];
+        assert_eq!(pick_official(&[], 7), None);
+        assert_eq!(
+            pick_official(&pool, 7).map(|official| official.id),
+            pick_official(&pool, 7).map(|official| official.id),
+        );
+        // Weight 100 vs 1: the top referee takes ~99% of seeds.
+        let top = (0..500u64)
+            .filter(|seed| pick_official(&pool, *seed).is_some_and(|o| o.id == 1))
+            .count();
+        assert!(top > 480, "top takes {top}/500");
     }
 }

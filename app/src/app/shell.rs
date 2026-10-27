@@ -147,14 +147,10 @@ impl OpenCmApp {
     /// Main-menu screen: top info bar, next match, sidebar, content.
     /// The match-day screen replaces everything below the top bar.
     pub fn show_game(&mut self, ui: &mut egui::Ui) {
-        self.show_game_top_bar(ui);
-        ui.separator();
         if self.shell.match_day.is_some() {
             self.show_matchday(ui);
             return;
         }
-        self.show_next_match(ui);
-        ui.separator();
         ui.horizontal(|ui| {
             self.show_sidebar(ui);
             ui.separator();
@@ -164,9 +160,9 @@ impl OpenCmApp {
         });
     }
 
-    /// Manager, club, date plus Holiday/Save, as on top of the
-    /// original main screen. Continue lives in the bottom action bar.
-    fn show_game_top_bar(&mut self, ui: &mut egui::Ui) {
+    /// Fixed headerbar: manager, club, date and next match info on
+    /// the left, the Menu on the right. Actions live in the footer.
+    pub(super) fn show_game_header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             let manager = self
                 .state
@@ -179,25 +175,22 @@ impl OpenCmApp {
             ui.label(self.managed_club_name());
             ui.separator();
             ui.label(self.state.current_date.to_string());
-            ui.separator();
-            if ui.button(t("shell-holiday-7-days")).clicked() {
-                for _ in 0..7 {
-                    let schedule = self.state.schedule.clone();
-                    process_day(&mut self.state, &schedule);
-                    // The assistant takes charge of due matches.
-                    self.simulate_day(true);
+            if let Some((line, due)) = self.next_match_info() {
+                ui.separator();
+                ui.label(line);
+                if due
+                    && self.shell.match_day.is_none()
+                    && ui.button(t("fixtures-match-day")).clicked()
+                {
+                    self.enter_match_day();
                 }
-                self.rollover_calendar_if_needed();
-                self.status = tr(
-                    "shell-holidayed-to",
-                    &[("date", &self.state.current_date.to_string())],
-                );
-            }
-            if ui.button(t("shell-save-game")).clicked() {
-                self.save_active_career();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.menu_button(t("shell-menu"), |ui| {
+                    if ui.button(t("shell-save-game")).clicked() {
+                        self.save_active_career();
+                        ui.close_menu();
+                    }
                     if ui.button(t("career-back-to-setup")).clicked() {
                         self.screen = Screen::SetupWizard;
                         ui.close_menu();
@@ -211,8 +204,25 @@ impl OpenCmApp {
         });
     }
 
-    /// Next unplayed fixture of the managed club, if any.
-    fn show_next_match(&mut self, ui: &mut egui::Ui) {
+    /// Simulate a week with the assistant in charge, then report
+    /// where the holiday landed.
+    pub(super) fn holiday_week(&mut self) {
+        for _ in 0..7 {
+            let schedule = self.state.schedule.clone();
+            process_day(&mut self.state, &schedule);
+            // The assistant takes charge of due matches.
+            self.simulate_day(true);
+        }
+        self.rollover_calendar_if_needed();
+        self.status = tr(
+            "shell-holidayed-to",
+            &[("date", &self.state.current_date.to_string())],
+        );
+    }
+
+    /// Next unplayed fixture of the managed club as a display line,
+    /// plus whether it is due (playable now).
+    fn next_match_info(&self) -> Option<(String, bool)> {
         let today = self.state.current_date;
         let managed = self.state.managed_club_id;
         let next = self
@@ -227,28 +237,14 @@ impl OpenCmApp {
                         fixture.home_club_id == id || fixture.away_club_id == id
                     })
             })
-            .min_by_key(|fixture| fixture.date);
-        match next {
-            Some(fixture) => {
-                let date = fixture.date.to_string();
-                let game = self.fixture_line(fixture);
-                ui.horizontal(|ui| {
-                    ui.label(tr(
-                        "fixtures-next-match",
-                        &[("match", &game), ("date", &date)],
-                    ));
-                    let due = managed
-                        .and_then(|id| self.state.schedule.due_unplayed(id, today))
-                        .is_some();
-                    if due && ui.button(t("fixtures-match-day")).clicked() {
-                        self.enter_match_day();
-                    }
-                });
-            }
-            None => {
-                ui.label(t("fixtures-no-upcoming"));
-            }
-        }
+            .min_by_key(|fixture| fixture.date)?;
+        let date = next.date.to_string();
+        let game = self.fixture_line(next);
+        let line = tr("fixtures-next-match", &[("match", &game), ("date", &date)]);
+        let due = managed
+            .and_then(|id| self.state.schedule.due_unplayed(id, today))
+            .is_some();
+        Some((line, due))
     }
 
     /// Section list on the left, original-game order. News carries
@@ -849,7 +845,7 @@ impl OpenCmApp {
 
     /// Re-save the active career to the file it was started from or
     /// loaded from.
-    fn save_active_career(&mut self) {
+    pub(super) fn save_active_career(&mut self) {
         let Some(file_name) = self.career.active_save_file.clone() else {
             self.status = t("shell-no-active-save");
             return;

@@ -26,6 +26,10 @@ impl OpenCmApp {
     /// flows when something is missing, then the option grid with
     /// database-gated actions. Every launch lands here.
     pub fn show_setup_game(&mut self, ui: &mut egui::Ui, importing: bool) {
+        if !self.leagues_ready() {
+            self.show_splash(ui, importing);
+            return;
+        }
         ui.heading(t("setup-title"));
         ui.add_space(4.0);
         self.show_readiness(ui);
@@ -115,6 +119,138 @@ impl OpenCmApp {
         });
     }
 
+    /// First-launch splash: pixel-art backdrop, title, and one
+    /// vertical button stack driving the ISO import.
+    fn show_splash(&mut self, ui: &mut egui::Ui, importing: bool) {
+        self.paint_splash_bg(ui);
+        ui.vertical_centered(|ui| {
+            ui.add_space(36.0);
+            ui.label(
+                egui::RichText::new("OpenCM0102")
+                    .size(48.0)
+                    .color(crate::theme::palette::INK),
+            );
+            ui.label(
+                egui::RichText::new(t("setup-splash-tagline"))
+                    .size(15.0)
+                    .color(crate::theme::palette::INK_DIM),
+            );
+            ui.add_space(28.0);
+            if importing {
+                ui.horizontal(|ui| {
+                    ui.add(egui::Spinner::new());
+                    ui.label(&self.import_stage);
+                });
+            } else {
+                match self.iso_state() {
+                    IsoState::Missing => {
+                        ui.label(t("setup-select-iso-body"));
+                        ui.add_space(8.0);
+                        if self.splash_button(ui, &t("setup-select-iso-button")) {
+                            self.pick_iso();
+                        }
+                    }
+                    IsoState::Selected { path, present } => {
+                        if present {
+                            ui.label(t("setup-import-body"));
+                            ui.add_space(8.0);
+                            if self.splash_button(ui, &t("setup-import-button")) {
+                                self.start_import(path);
+                            }
+                            ui.add_space(4.0);
+                            if self.splash_button(ui, &t("setup-select-iso-button")) {
+                                self.pick_iso();
+                            }
+                        } else {
+                            ui.label(t("setup-iso-gone-body"));
+                            ui.add_space(8.0);
+                            if self.splash_button(ui, &t("setup-select-iso-button")) {
+                                self.pick_iso();
+                            }
+                            ui.add_space(4.0);
+                            if self.splash_button(ui, &t("setup-disconnect")) {
+                                self.disconnect();
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(error) = self.error.clone() {
+                ui.add_space(8.0);
+                ui.colored_label(egui::Color32::LIGHT_RED, error);
+            }
+            ui.add_space(16.0);
+            ui.horizontal(|ui| {
+                if ui.small_button(t("setup-game-settings")).clicked() {
+                    self.screen = Screen::GameSettings;
+                }
+                if ui.small_button(t("setup-game-credits")).clicked() {
+                    self.screen = Screen::Credits;
+                }
+                if ui.small_button(t("action-exit-game")).clicked() {
+                    ui.ctx()
+                        .send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            });
+        });
+    }
+
+    /// One full-width splash stack button.
+    fn splash_button(&mut self, ui: &mut egui::Ui, label: &str) -> bool {
+        ui.add_sized([280.0, 46.0], egui::Button::new(label))
+            .clicked()
+    }
+
+    /// Pixel-art splash texture, decoded once from the embedded PNG
+    /// (nearest filtering keeps the pixels crisp).
+    fn splash_texture(&mut self, ctx: &egui::Context) -> Option<(egui::TextureId, egui::Vec2)> {
+        if self.splash_tex.is_none() {
+            const BYTES: &[u8] = include_bytes!("../../../assets/splash-pixel-stadium.png");
+            let decoded =
+                image::load_from_memory_with_format(BYTES, image::ImageFormat::Png).ok()?;
+            let rgba = decoded.to_rgba8();
+            let size = egui::vec2(rgba.width() as f32, rgba.height() as f32);
+            let image = egui::ColorImage::from_rgba_unmultiplied(
+                [size.x as usize, size.y as usize],
+                &rgba,
+            );
+            self.splash_tex = Some((
+                ctx.load_texture("splash", image, egui::TextureOptions::NEAREST),
+                size,
+            ));
+        }
+        self.splash_tex
+            .as_ref()
+            .map(|(handle, size)| (handle.id(), *size))
+    }
+
+    /// Paint the splash backdrop edge-to-edge (cover fit) with a
+    /// dark overlay for legibility. Must run before any widgets.
+    fn paint_splash_bg(&mut self, ui: &mut egui::Ui) {
+        let rect = ui.available_rect_before_wrap();
+        let Some((id, size)) = self.splash_texture(ui.ctx()) else {
+            return;
+        };
+        let img_aspect = size.x / size.y.max(1.0);
+        let rect_aspect = rect.width() / rect.height().max(1.0);
+        let uv = if rect_aspect > img_aspect {
+            let h = (img_aspect / rect_aspect).clamp(0.0, 1.0);
+            egui::Rect::from_min_max(
+                egui::pos2(0.0, (1.0 - h) / 2.0),
+                egui::pos2(1.0, (1.0 + h) / 2.0),
+            )
+        } else {
+            let w = (rect_aspect / img_aspect).clamp(0.0, 1.0);
+            egui::Rect::from_min_max(
+                egui::pos2((1.0 - w) / 2.0, 0.0),
+                egui::pos2((1.0 + w) / 2.0, 1.0),
+            )
+        };
+        ui.painter().image(id, rect, uv, egui::Color32::WHITE);
+        ui.painter()
+            .rect_filled(rect, 0.0, egui::Color32::from_black_alpha(150));
+    }
+
     /// Developer utilities and session controls, kept out of the game.
     fn show_tools(&mut self, ui: &mut egui::Ui) {
         ui.heading(t("setup-tools-title"));
@@ -127,6 +263,9 @@ impl OpenCmApp {
             if ui.button(t("tools-database-editor")).clicked() {
                 self.screen = Screen::DatabaseEditor;
                 self.editor.loaded = false;
+            }
+            if ui.button(t("tools-data-dir")).clicked() {
+                self.pick_data_dir();
             }
             if read_session().is_some() {
                 ui.separator();
@@ -229,6 +368,23 @@ impl OpenCmApp {
             .pick_file()
         {
             self.start_import(file);
+        }
+    }
+
+    /// Point the game at an installed Data directory: its
+    /// `events_eng.cfg` and `weather.cfg` override the built-ins.
+    fn pick_data_dir(&mut self) {
+        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+            super::save_game_data_dir(&dir);
+            self.game_data_dir = Some(dir);
+            self.reload_commentary_pack();
+            self.reload_weather_table();
+            let count = self.commentary_pack.len().to_string();
+            let zones = self.weather_table.zones.len().to_string();
+            self.status = tr(
+                "tools-pack-loaded",
+                &[("count", &count), ("zones", &zones)],
+            );
         }
     }
 
