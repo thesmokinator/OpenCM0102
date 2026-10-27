@@ -77,3 +77,17 @@ all become editable data with the 01/02 behaviour as default — see
 - CA formula, PA ranges, growth curves, morale numerics, attribute
   effects, hidden attributes, label mapping: needs playtest plus
   function-level analysis.
+- Function-level status: the per-slot player evaluator behind
+  club-strength ranking is located (10,000-based scale divided
+  by 100, -10,000 sentinel for missing club, slot-weight masks)
+  together with the best-fifteen selector used for seeding.
+  Stored CA is copied from the database, not derived at load:
+  the loader, record converter and index resolver perform no
+  ability arithmetic, so any CA recomputation happens in the
+  editor/data tooling, while the game derives only runtime
+  values (a match attribute from position-gated attribute
+  terms, the slot evaluator and club strength). In match play, duels
+  resolve as paired uniform rolls bounded by (30 - attribute)
+  terms with a times-six difference, scaled by small double
+  constants (0.0025 / 1.0 / 0.5 / 2.0 / 10.5 family), with a
+  separate foul/card branch. (Function-level analysis.)

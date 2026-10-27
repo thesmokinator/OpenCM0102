@@ -146,3 +146,26 @@ chance/goal model constants must all become editable data with the
   modifiers, home advantage, AI substitutions, assist definition,
   ban accounting: needs playthrough observation plus
   function-level analysis.
+- Function-level status: the shot-score routine and the match
+  event/challenge (duel) routine are located and decompiled,
+  and the call map is complete: one large central match hub
+  invokes both the duel resolver and the shot scorer. Inside
+  the hub, each shot type sets a binary flag deterministically
+  for some types, with probability two-thirds or one-quarter
+  for others, and by coin flip by default; position derives
+  from pitch-grid coordinates with distance bands at 260 and
+  376, stamina drains by half a drawn value per action, and
+  rare special events fire on a one-in-ten roll inside a
+  narrow state window. The displayed
+  ratings, attendance and man-of-the-match lines resolve to
+  screen renderers, so the exact rating, attendance and
+  man-of-the-match formulas live in the field writers and stay
+  open until those writers are traced. The persisted match-stats
+  file is a count, that many 12-byte aggregate records, then six
+  header words (load/save pair verified). Per-match detail lives
+  in a separate ring file of 3,450-byte records in four
+  partitions with per-partition wraparound counters (20,000
+  slots in the modern sample); each record header sits near its
+  end. Exact rating and man-of-the-match field writers inside
+  the 3,450-byte record remain the open trace. (Function-level
+  analysis.)

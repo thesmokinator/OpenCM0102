@@ -99,3 +99,16 @@ become editable data with the 01/02 behaviour as default — see
 - Toggle-instruction values, rating-to-slot mapping, per-competition
   sub caps, captaincy effects, slot legality, preset byte semantics:
   needs playtest plus function-level analysis.
+- Function-level status: formation player bytes pack five high
+  bits per player (masked reads by side type), slot accessors
+  validate indices 0–10 (eleven slots), and preset file names
+  follow the `<shape>[_attacking|_defensive]_default.pct`
+  catalogue. Across the 40 shipped presets, files are 1,428,
+  1,432 or 1,476 bytes with a size-linked header word and a
+  plain-text author at offset 54; an attacking variant differs
+  from its default in only 51 bytes, concentrated in the
+  instruction blocks. Per-byte instruction semantics remain
+  open. Finance-side fee computation (club
+  finance module) uses value-thirds with per-thousand uplifts
+  and 500-rounding — see [transfers.md](transfers.md).
+  (Function-level analysis.)
