@@ -13,7 +13,7 @@
 //! from an earlier round) carry through as byes.
 
 /// Per-round draw mode, from the round's own configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DrawMode {
     /// Fisher-Yates shuffle, then pair in order.
     Plain,
@@ -45,6 +45,95 @@ impl Entrant {
             seeding,
             nation: None,
         }
+    }
+}
+
+/// One step of a round's tiebreak ladder, from the round's own
+/// configuration: replay, extra time (standard or golden goal),
+/// away goals (after ninety minutes or after extra time), shootouts,
+/// higher-seeding progression, or a best-over-3 series.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum TiebreakStep {
+    /// Replay the tie.
+    Replay,
+    /// Standard extra time.
+    ExtraTime,
+    /// Golden-goal extra time.
+    GoldenGoal,
+    /// Away goals count after ninety minutes.
+    AwayGoalsAfterNinety,
+    /// Away goals count after extra time.
+    AwayGoalsAfterExtraTime,
+    /// Penalty shootout.
+    Penalties,
+    /// US-style shootout.
+    UsShootout,
+    /// Higher seeding progresses.
+    HigherSeeding,
+    /// Best over three matches.
+    BestOfThree,
+}
+
+/// One cup round's binding: draw mode, legs and tiebreak ladder.
+/// Per-competition values land here as editable data; until a
+/// competition's rules are observed, its rounds stay unbound.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CupRound {
+    /// Round name, e.g. `First Round`.
+    pub name: String,
+    /// Draw mode for this round.
+    pub mode: DrawMode,
+    /// Legs played (1 or 2).
+    pub legs: u8,
+    /// Tiebreak ladder in order.
+    pub tiebreak: Vec<TiebreakStep>,
+}
+
+/// One competition's cup bindings: its rounds in playing order.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CupRules {
+    /// Competition id (`club_comp`/`nation_comp` id space).
+    pub competition_id: u32,
+    /// Rounds in playing order.
+    pub rounds: Vec<CupRound>,
+}
+
+/// Runtime draw state of one cup: bindings plus the byes carried
+/// between rounds.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CupState {
+    /// This cup's bindings.
+    pub rules: CupRules,
+    /// Rounds drawn so far.
+    pub round_index: usize,
+    /// Byes carried into the next round.
+    pub byes: Vec<u32>,
+}
+
+impl CupState {
+    /// New cup draw state at its first round, with no carried byes.
+    pub fn new(rules: CupRules) -> Self {
+        Self {
+            rules,
+            round_index: 0,
+            byes: Vec::new(),
+        }
+    }
+
+    /// Round to draw next, if any round remains.
+    pub fn current_round(&self) -> Option<&CupRound> {
+        self.rules.rounds.get(self.round_index)
+    }
+
+    /// Draw the current round from `entrants` plus carried-in byes,
+    /// advancing to the next round. Returns the drawn round and its
+    /// outcome; `None` when no round remains.
+    pub fn draw_next(&mut self, entrants: &[Entrant], seed: u64) -> Option<(CupRound, DrawOutcome)> {
+        let round = self.current_round()?.clone();
+        let outcome = draw_round(entrants, &self.byes, round.mode, seed);
+        self.byes = outcome.byes.clone();
+        self.round_index += 1;
+        Some((round, outcome))
     }
 }
 
@@ -262,6 +351,49 @@ mod tests {
         assert_eq!(outcome, repeat);
         assert_eq!(outcome.ties.len(), 3);
         assert!(outcome.byes.is_empty());
+    }
+
+    /// Rounds draw in order with byes carrying between them.
+    #[test]
+    fn cup_state_progresses_rounds_with_byes() {
+        let rules = CupRules {
+            competition_id: 351,
+            rounds: vec![
+                CupRound {
+                    name: "First Round".to_string(),
+                    mode: DrawMode::Plain,
+                    legs: 1,
+                    tiebreak: vec![TiebreakStep::Penalties],
+                },
+                CupRound {
+                    name: "Final".to_string(),
+                    mode: DrawMode::Seeded,
+                    legs: 1,
+                    tiebreak: vec![TiebreakStep::ExtraTime, TiebreakStep::Penalties],
+                },
+            ],
+        };
+        let mut cup = CupState::new(rules);
+        assert_eq!(cup.current_round().map(|round| round.name.as_str()), Some("First Round"));
+        let entrants: Vec<Entrant> =
+            (1..=7).map(|id| Entrant::unscoped(id, i64::from(id))).collect();
+        let (first, outcome) = cup.draw_next(&entrants, 9).expect("round remains");
+        assert_eq!(first.name, "First Round");
+        assert_eq!(outcome.ties.len(), 3);
+        assert_eq!(outcome.byes.len(), 1);
+        assert_eq!(cup.byes, outcome.byes);
+        let winners: Vec<Entrant> = outcome
+            .ties
+            .iter()
+            .map(|tie| Entrant::unscoped(tie.home, 0))
+            .chain(outcome.byes.iter().map(|id| Entrant::unscoped(*id, 0)))
+            .collect();
+        let (second, final_outcome) = cup.draw_next(&winners, 10).expect("final remains");
+        assert_eq!(second.name, "Final");
+        assert_eq!(final_outcome.ties.len(), 2);
+        assert!(final_outcome.byes.is_empty());
+        assert!(cup.current_round().is_none());
+        assert!(cup.draw_next(&[], 11).is_none());
     }
 
     /// Nation avoidance never pairs same-nation clubs when an

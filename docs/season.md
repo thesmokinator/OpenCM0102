@@ -153,7 +153,14 @@ Implementation shape, in `cm0102-core` `simulation` plus the app:
 `process_day()` advances one day, the app simulates the day's
 world and pushes news, and `stops_for()` matches the day against
 the editable stop rules (`ContinueRules`: own match, inbox, offer
-response, deadline, plus a safety day cap).
+response, deadline, plus a safety day cap). `apply_daily_engines`
+runs the engine stages each simulated day — permit decisions,
+board-confidence steps, retired-list consumption into regen dues
+and scripted setup-event queueing — returning a report the app
+renders as inbox news. The app feeds it the data-dir
+`player_setup.cfg` script daily; permit applications and
+result-driven board steps have no source flows yet, so those
+stages rest until they land.
 
 ## Season rollover (implemented)
 

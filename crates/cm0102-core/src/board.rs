@@ -108,6 +108,13 @@ pub struct ManagerConfidence {
     pub history: Vec<ConfidenceEntry>,
 }
 
+impl Default for ManagerConfidence {
+    /// Neutral start: the top of the satisfied band.
+    fn default() -> Self {
+        Self::neutral()
+    }
+}
+
 impl ManagerConfidence {
     /// Neutral start: the top of the satisfied band.
     pub fn neutral() -> Self {

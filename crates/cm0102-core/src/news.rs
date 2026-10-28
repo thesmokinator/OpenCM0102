@@ -25,6 +25,8 @@ pub enum NewsCategory {
     Suspension,
     /// Board confidence and expectations.
     Board,
+    /// Transfers, loans and work permits.
+    Transfer,
     /// A fixture was postponed (unplayable pitch).
     Postponed,
 }

@@ -83,7 +83,12 @@ carried-in byes: `DrawMode::Plain` shuffles, `Seeded` and
 from a random start with wraparound, flipping a coin for home/away
 per tie. `seeding_score` sums the documented key (squad-value term
 plus sixteen times club strength plus weighted best-fifteen
-ratings). Per-round mode bindings stay open.
+ratings). `CupRules` binds one competition to its rounds (draw
+mode, legs, tiebreak ladder of replay, extra-time variants,
+away-goals variants, shootouts, higher-seeding progression and
+best-of-3), and `CupState` draws the rounds in order with byes
+carrying between them. Observed per-competition values stay open —
+rounds land here only once confirmed against the patched game.
 
 ## Calendars (implemented)
 

@@ -31,7 +31,10 @@ pub use board::{
     BoardOutcome, ConfidenceBand, ConfidenceEntry, ManagerConfidence, SackCause, band,
     CONFIDENCE_MAX,
 };
-pub use cup::{CupTie, DrawMode, DrawOutcome, Entrant, draw_round, seeding_score, value_term};
+pub use cup::{
+    CupRound, CupRules, CupState, CupTie, DrawMode, DrawOutcome, Entrant, TiebreakStep, draw_round,
+    seeding_score, value_term,
+};
 pub use regen::{
     UnattachedDraws, inherit_attached, regen_count, valid_unattached, ATTACHED_THRESHOLD,
     UNATTACHED_NARROW_MAX, UNATTACHED_WIDE_MAX,
@@ -67,8 +70,9 @@ pub use orig_save::{
 };
 pub use preset::{Preset, PresetError, AUTHOR_OFFSET, PLAYER_BITS_MASK, PRESET_SIZES, PRESET_SLOTS};
 pub use simulation::{
-    ContinueOutcome, ContinueRules, DayEvents, DayEventSource, NoEvents, StopReason,
-    continue_until_event, continue_until_event_with_hook, process_day, stops_for,
+    ContinueOutcome, ContinueRules, DailyEngineInput, DailyEngineReport, DayEvents, DayEventSource,
+    NoEvents, StopReason, apply_daily_engines, continue_until_event, continue_until_event_with_hook,
+    process_day, stops_for,
 };
 pub use traits::{
     strictness_for_official, DataProvider, EventKind, MatchContext, MatchEngine, MatchEvent,

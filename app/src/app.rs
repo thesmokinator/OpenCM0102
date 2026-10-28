@@ -135,6 +135,8 @@ pub struct OpenCmApp {
     commentary_pack: cm0102_match::CommentaryPack,
     /// Active climate table (built-in unless the data dir has one).
     weather_table: cm0102_core::WeatherTable,
+    /// Scripted setup transfers/loans from the data dir, if present.
+    setup_script: Vec<cm0102_core::SetupEvent>,
     /// Splash background texture and size, decoded once from the
     /// embedded pixel art.
     splash_tex: Option<(egui::TextureHandle, egui::Vec2)>,
@@ -173,6 +175,7 @@ impl OpenCmApp {
             commentary_pack: cm0102_match::CommentaryPack::builtin()
                 .unwrap_or_default(),
             weather_table: cm0102_core::WeatherTable::builtin(),
+            setup_script: Vec::new(),
             splash_tex: None,
         };
         app.restore_session();
@@ -195,6 +198,22 @@ impl OpenCmApp {
         }
         self.reload_commentary_pack();
         self.reload_weather_table();
+        self.reload_setup_script();
+    }
+
+    /// Load `player_setup.cfg` from the data dir when present, else
+    /// keep the empty script (no scripted transfers apply).
+    fn reload_setup_script(&mut self) {
+        let Some(dir) = &self.game_data_dir else {
+            return;
+        };
+        let path = dir.join("player_setup.cfg");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        // Original files are Windows text: decode lossily.
+        let text = String::from_utf8_lossy(&bytes);
+        self.setup_script = cm0102_core::parse_setup_events(&text);
     }
 
     /// Load `events_eng.cfg` from the data dir when present and

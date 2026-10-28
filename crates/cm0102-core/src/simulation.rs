@@ -13,9 +13,13 @@
 //! [`process_day`] with an empty feed.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
+use crate::board::BoardOutcome;
 use crate::calendar::GameDate;
 use crate::game_state::GameState;
+use crate::transfers::{PermitOutcome, SetupEvent, process_permits};
+use crate::regen::regen_count;
 
 /// Manager-facing events produced while simulating one day.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -153,6 +157,88 @@ pub fn continue_until_event_with_hook<S: DayEventSource>(
     }
 }
 
+/// Input to one day's engine stages: the caller (editable rules,
+/// later) resolves what the world did today; the pipeline applies
+/// the documented mechanics and reports what happened for the inbox.
+#[derive(Debug, Clone, Default)]
+pub struct DailyEngineInput {
+    /// Qualifying dates for pending permit decisions, by player id.
+    pub qualifying: HashMap<u32, GameDate>,
+    /// Expiry season stamped on permits granted today.
+    pub permit_season: u16,
+    /// Nation stamping permits granted today.
+    pub permit_nation: u32,
+    /// Signed board-confidence step (0 applies nothing). Result
+    /// formulas stay open, so the caller owns the magnitude.
+    pub board_step: i32,
+    /// Board outcome to queue as news, if the board acted today.
+    pub board_outcome: Option<BoardOutcome>,
+    /// Staff ids retiring today, feeding regen processing.
+    pub retired_today: Vec<u32>,
+    /// Scripted setup transfers/loans due today, queued for the
+    /// database layer to apply.
+    pub setup_due: Vec<SetupEvent>,
+}
+
+/// What one day's engine stages did: the application renders the
+/// inbox news from this report.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DailyEngineReport {
+    /// Players granted a permit today, in ascending id order.
+    pub permit_grants: Vec<u32>,
+    /// Players refused a permit today, in ascending id order.
+    pub permit_refusals: Vec<u32>,
+    /// Regens newly due from retired-staff consumption.
+    pub regens_due_now: usize,
+    /// Setup events queued for the database layer.
+    pub setup_queued: usize,
+    /// Board outcome to announce, if the board acted today.
+    pub board_outcome: Option<BoardOutcome>,
+}
+
+/// Run one day's engine stages against `state` for `today`:
+/// permit decisions, the board-confidence step, retired-list
+/// consumption into regen dues, and setup-event queueing. Pure
+/// state changes; the caller renders news from the report.
+pub fn apply_daily_engines(
+    state: &mut GameState,
+    today: GameDate,
+    input: DailyEngineInput,
+) -> DailyEngineReport {
+    let outcomes = process_permits(
+        &mut state.permits,
+        today,
+        &input.qualifying,
+        input.permit_season,
+        input.permit_nation,
+    );
+    let mut players: Vec<u32> = outcomes.keys().copied().collect();
+    players.sort_unstable();
+    let mut report = DailyEngineReport {
+        board_outcome: input.board_outcome,
+        ..DailyEngineReport::default()
+    };
+    for player_id in players {
+        match outcomes[&player_id] {
+            PermitOutcome::Granted => report.permit_grants.push(player_id),
+            PermitOutcome::Refused => report.permit_refusals.push(player_id),
+        }
+    }
+    if input.board_step != 0 {
+        state.board_confidence.apply_step(today, input.board_step);
+    }
+    state.retired_staff.extend(input.retired_today);
+    let due = regen_count(state.retired_staff.len());
+    if due > 0 {
+        state.regen_due += due;
+        state.retired_staff.clear();
+        report.regens_due_now = due;
+    }
+    report.setup_queued = input.setup_due.len();
+    state.pending_transfers.extend(input.setup_due);
+    report
+}
+
 /// First matching stop condition, in spec priority order. Public
 /// so the application can run its own day loop (its daily hook
 /// needs world access the core hook cannot borrow).
@@ -237,6 +323,60 @@ mod tests {
         assert_eq!(outcome.days_advanced, 3);
         assert_eq!(outcome.stop, StopReason::MaxDaysReached);
         assert_eq!(state.current_date, GameDate::new(2001, 7, 4));
+    }
+
+    /// One day's engines decide permits, move confidence, consume
+    /// retirements into regen dues and queue setup events.
+    #[test]
+    fn daily_engines_apply_all_stages() {
+        use crate::board::SackCause;
+        use crate::transfers::SetupEvent;
+
+        let mut state = GameState::new_season();
+        let today = GameDate::new(2001, 7, 5);
+        let confidence_before = state.board_confidence.value;
+        let input = DailyEngineInput {
+            qualifying: HashMap::from([
+                (1u32, GameDate::new(2001, 7, 6)),
+                (2u32, GameDate::new(2001, 9, 1)),
+            ]),
+            permit_season: 2002,
+            permit_nation: 50,
+            board_step: -500,
+            board_outcome: Some(BoardOutcome::PatienceWarning),
+            retired_today: vec![10, 11, 12, 13],
+            setup_due: vec![SetupEvent::FutureTransfer {
+                player: ["A".to_string(), "B".to_string(), "C".to_string()],
+                from_club: "X".to_string(),
+                to_club: "Y".to_string(),
+                date: today,
+            }],
+        };
+        let report = apply_daily_engines(&mut state, today, input);
+        assert_eq!(report.permit_grants, vec![1]);
+        assert_eq!(report.permit_refusals, vec![2]);
+        assert!(crate::transfers::holds_permit(&state.permits, 1));
+        assert_eq!(state.board_confidence.value, confidence_before - 500);
+        assert_eq!(report.board_outcome, Some(BoardOutcome::PatienceWarning));
+        assert_eq!(report.regens_due_now, 2);
+        assert_eq!(state.regen_due, 2);
+        assert!(state.retired_staff.is_empty());
+        assert_eq!(report.setup_queued, 1);
+        assert_eq!(state.pending_transfers.len(), 1);
+        let _ = SackCause::Results;
+    }
+
+    /// Empty input leaves engine state untouched.
+    #[test]
+    fn daily_engines_rest_on_empty_input() {
+        let mut state = GameState::new_season();
+        let today = GameDate::SEASON_START;
+        let report =
+            apply_daily_engines(&mut state, today, DailyEngineInput::default());
+        assert_eq!(report, DailyEngineReport::default());
+        assert!(state.permits.is_empty());
+        assert_eq!(state.regen_due, 0);
+        assert!(state.board_confidence.history.is_empty());
     }
 
     #[test]

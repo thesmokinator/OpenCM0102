@@ -9,8 +9,9 @@
 use std::collections::{HashMap, HashSet};
 
 use cm0102_core::{
-    EventKind, Fixture, FixtureResult, GameDate, MatchContext, MatchEngine, MatchResult,
-    MatchWeather, Mentality, NewsCategory, Referee,
+    BoardOutcome, DailyEngineInput, EventKind, Fixture, FixtureResult, GameDate, MatchContext,
+    MatchEngine, MatchResult, MatchWeather, Mentality, NewsCategory, Referee, SackCause,
+    apply_daily_engines, due_events,
 };
 use cm0102_match::SimulationEngine;
 
@@ -92,6 +93,71 @@ impl OpenCmApp {
             }
         }
         self.push_results_roundup(&roundup);
+        self.run_daily_engines();
+    }
+
+    /// Run the day's engine stages (permits, board confidence, regen
+    /// dues, scripted setup transfers) and announce their outcomes.
+    /// Permit and board inputs have no source flows yet, so those
+    /// stages rest until applications and result formulas land; the
+    /// scripted setup queue feeds from the data dir's cfg today.
+    fn run_daily_engines(&mut self) {
+        let today = self.state.current_date;
+        let setup_due: Vec<cm0102_core::SetupEvent> =
+            due_events(&self.setup_script, today).into_iter().cloned().collect();
+        let input = DailyEngineInput {
+            setup_due,
+            ..DailyEngineInput::default()
+        };
+        let report = apply_daily_engines(&mut self.state, today, input);
+        for player_id in report.permit_grants {
+            let name = self.staff_display_name(player_id);
+            self.state.push_news(
+                NewsCategory::Transfer,
+                tr("news-permit-grant-headline", &[("name", &name)]),
+                tr("news-permit-grant-body", &[("name", &name)]),
+            );
+        }
+        for player_id in report.permit_refusals {
+            let name = self.staff_display_name(player_id);
+            self.state.push_news(
+                NewsCategory::Transfer,
+                tr("news-permit-refuse-headline", &[("name", &name)]),
+                tr("news-permit-refuse-body", &[("name", &name)]),
+            );
+        }
+        if let Some(outcome) = report.board_outcome {
+            let (headline_key, body_key) = match outcome {
+                BoardOutcome::VoteOfConfidence => {
+                    ("news-board-vote-headline", "news-board-vote-body")
+                }
+                BoardOutcome::PatienceWarning => {
+                    ("news-board-warning-headline", "news-board-warning-body")
+                }
+                BoardOutcome::Sacking(cause) => match cause {
+                    SackCause::Results => {
+                        ("news-board-sacked-headline", "news-board-sacked-results-body")
+                    }
+                    SackCause::LeaguePosition => {
+                        ("news-board-sacked-headline", "news-board-sacked-position-body")
+                    }
+                    SackCause::SupporterPressure => {
+                        ("news-board-sacked-headline", "news-board-sacked-supporters-body")
+                    }
+                },
+            };
+            self.state
+                .push_news(NewsCategory::Board, t(headline_key), t(body_key));
+        }
+    }
+
+    /// Display name for a staff id, falling back to the id itself.
+    fn staff_display_name(&self, player_id: u32) -> String {
+        self.provider
+            .as_ref()
+            .and_then(|provider| provider.get_player(player_id).ok())
+            .map(|player| player.full_name())
+            .unwrap_or_else(|| player_id.to_string())
     }
 
     /// Match weather for a fixture: the home ground's climate zone
@@ -585,6 +651,7 @@ fn news_category_label(category: &NewsCategory) -> String {
         NewsCategory::Injury => "news-cat-injury",
         NewsCategory::Suspension => "news-cat-suspension",
         NewsCategory::Board => "news-cat-board",
+        NewsCategory::Transfer => "news-cat-transfer",
         NewsCategory::Postponed => "news-cat-postponed",
     })
 }

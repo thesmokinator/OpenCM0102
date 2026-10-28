@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use crate::calendar::GameDate;
 
 /// One work-permit record: the persisted 14-byte shape.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PermitRecord {
     /// Player id.
     pub player_id: u32,
@@ -137,7 +137,7 @@ fn within_days(today: GameDate, date: GameDate, days: u32) -> bool {
 }
 
 /// One scripted setup event from `player_setup.cfg`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SetupEvent {
     /// A future transfer applying on `date`.
     FutureTransfer {

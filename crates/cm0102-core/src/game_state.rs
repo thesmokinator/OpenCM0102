@@ -6,12 +6,14 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::board::ManagerConfidence;
 use crate::calendar::GameDate;
 use crate::data::Manager;
 use crate::news::{NewsCategory, NewsItem};
 use crate::schedule::Schedule;
 use crate::tactics::TeamTactics;
 use crate::traits::MatchResult;
+use crate::transfers::{PermitRecord, SetupEvent};
 
 /// Matches banned after a second yellow (provisional).
 pub const SECOND_YELLOW_BAN: u32 = 1;
@@ -56,6 +58,22 @@ pub struct GameState {
     /// Next inbox id to hand out.
     #[serde(default)]
     pub next_news_id: u64,
+    /// Held work permits, sorted by player id. Empty in older saves.
+    #[serde(default)]
+    pub permits: Vec<PermitRecord>,
+    /// Board confidence in the human manager. Neutral in older saves.
+    #[serde(default)]
+    pub board_confidence: ManagerConfidence,
+    /// Retired-staff ids awaiting regen processing. Empty in older saves.
+    #[serde(default)]
+    pub retired_staff: Vec<u32>,
+    /// Regens due to be created (retired count minus two).
+    #[serde(default)]
+    pub regen_due: usize,
+    /// Scripted setup transfers/loans due but not yet applied to the
+    /// database. Empty in older saves.
+    #[serde(default)]
+    pub pending_transfers: Vec<SetupEvent>,
 }
 
 impl GameState {
@@ -72,6 +90,11 @@ impl GameState {
             yellow_counts: HashMap::new(),
             news: Vec::new(),
             next_news_id: 1,
+            permits: Vec::new(),
+            board_confidence: ManagerConfidence::neutral(),
+            retired_staff: Vec::new(),
+            regen_due: 0,
+            pending_transfers: Vec::new(),
         }
     }
 
