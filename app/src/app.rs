@@ -26,8 +26,8 @@ use std::sync::mpsc;
 use std::sync::Arc;
 
 use cm0102_core::{
-    Club, ContinueOutcome, ContinueRules, DataProvider, GameState, Player, Schedule, StopReason,
-    process_day, stops_for,
+    Club, Combined, ContinueOutcome, ContinueRules, DataProvider, GameState, Player, Schedule,
+    StopReason, TransferWindows, process_day, stops_for,
 };
 use cm0102_db::{
     import_game_data, import_inventory, validate_source, CabinetSource, GameDataSource, IsoSource,
@@ -335,8 +335,11 @@ impl OpenCmApp {
         let mut days_advanced = 0;
         let mut stop = StopReason::MaxDaysReached;
         loop {
-            let schedule = self.state.schedule.clone();
-            let mut events = process_day(&mut self.state, &schedule);
+            let source = Combined {
+                first: self.state.schedule.clone(),
+                second: TransferWindows,
+            };
+            let mut events = process_day(&mut self.state, &source);
             days_advanced += 1;
             self.simulate_day(false);
             events.inbox_items += self.state.fresh_news().len() as u32;
@@ -786,6 +789,12 @@ impl OpenCmApp {
                 self.show_setup_game(ui, importing);
                 return;
             }
+            // The Setup Game hub shares the stadium backdrop behind
+            // its scrollable content; the dark overlay keeps the
+            // dense hub readable.
+            if self.screen == Screen::SetupWizard {
+                self.paint_splash_bg(ui);
+            }
             // Every hub screen scrolls: nothing can overflow.
             egui::ScrollArea::vertical().show(ui, |ui| match self.screen {
                 Screen::SetupWizard => self.show_setup_game(ui, importing),
@@ -836,6 +845,24 @@ impl OpenCmApp {
                             }
                         }
                         matchday::MatchPhase::Live => {
+                            let paused = self
+                                .shell
+                                .match_day
+                                .as_ref()
+                                .is_some_and(|day| day.paused);
+                            if ui
+                                .button(crate::i18n::t(if paused {
+                                    "matchday-resume"
+                                } else {
+                                    "matchday-pause"
+                                }))
+                                .clicked()
+                            {
+                                if let Some(day) = self.shell.match_day.as_mut() {
+                                    day.paused = !paused;
+                                    day.last_tick = None;
+                                }
+                            }
                             self.show_speed_combo(ui);
                         }
                         matchday::MatchPhase::HalfTime => {

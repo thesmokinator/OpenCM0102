@@ -56,8 +56,8 @@ pub use schedule::{
     NON_LEAGUE_SLOTS, first_round_for_year,
 };
 pub use transfers::{
-    PermitOutcome, PermitRecord, SetupEvent, due_events, holds_permit, parse_setup_events,
-    permit_required, process_permits, remove_permit,
+    PermitOutcome, PermitRecord, SetupEvent, due_events, holds_permit, in_transfer_window,
+    is_window_deadline, parse_setup_events, permit_required, process_permits, remove_permit,
 };
 pub use tactics::{
     Formation, Lineup, LineupError, Marking, Mentality, PassTo, PlayerInstructions,
@@ -70,9 +70,9 @@ pub use orig_save::{
 };
 pub use preset::{Preset, PresetError, AUTHOR_OFFSET, PLAYER_BITS_MASK, PRESET_SIZES, PRESET_SLOTS};
 pub use simulation::{
-    ContinueOutcome, ContinueRules, DailyEngineInput, DailyEngineReport, DayEvents, DayEventSource,
-    NoEvents, StopReason, apply_daily_engines, continue_until_event, continue_until_event_with_hook,
-    process_day, stops_for,
+    Combined, ContinueOutcome, ContinueRules, DailyEngineInput, DailyEngineReport, DayEvents,
+    DayEventSource, NoEvents, StopReason, TransferWindows, apply_daily_engines,
+    continue_until_event, continue_until_event_with_hook, process_day, stops_for,
 };
 pub use traits::{
     strictness_for_official, DataProvider, EventKind, MatchContext, MatchEngine, MatchEvent,

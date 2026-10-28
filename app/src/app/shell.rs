@@ -835,7 +835,7 @@ impl OpenCmApp {
     }
 
     /// Managed club display name, or `—` when no career is active.
-    fn managed_club_name(&self) -> String {
+    pub(super) fn managed_club_name(&self) -> String {
         self.state
             .managed_club_id
             .and_then(|id| self.clubs.iter().find(|club| club.id == id))

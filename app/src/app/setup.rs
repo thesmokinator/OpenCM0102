@@ -226,7 +226,7 @@ impl OpenCmApp {
 
     /// Paint the splash backdrop edge-to-edge (cover fit) with a
     /// dark overlay for legibility. Must run before any widgets.
-    fn paint_splash_bg(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn paint_splash_bg(&mut self, ui: &mut egui::Ui) {
         let rect = ui.available_rect_before_wrap();
         let Some((id, size)) = self.splash_texture(ui.ctx()) else {
             return;

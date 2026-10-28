@@ -110,6 +110,7 @@ impl OpenCmApp {
             ..DailyEngineInput::default()
         };
         let report = apply_daily_engines(&mut self.state, today, input);
+        self.announce_setup_moves(today);
         for player_id in report.permit_grants {
             let name = self.staff_display_name(player_id);
             self.state.push_news(
@@ -148,6 +149,43 @@ impl OpenCmApp {
             };
             self.state
                 .push_news(NewsCategory::Board, t(headline_key), t(body_key));
+        }
+    }
+
+    /// Announce scripted transfers/loans touching the managed club:
+    /// arrivals and departures stop Continue through the inbox.
+    fn announce_setup_moves(&mut self, today: GameDate) {
+        let managed = self.managed_club_name();
+        let due: Vec<cm0102_core::SetupEvent> = self
+            .state
+            .pending_transfers
+            .iter()
+            .filter(|event| {
+                event.applies_on() == today
+                    && (event.to_club() == managed || event.from_club() == managed)
+            })
+            .cloned()
+            .collect();
+        for event in due {
+            let player = event.player_name();
+            let arriving = event.to_club() == managed;
+            let other = if arriving {
+                event.from_club()
+            } else {
+                event.to_club()
+            };
+            let loan = event.is_loan();
+            let (headline_key, body_key) = match (arriving, loan) {
+                (true, false) => ("news-transfer-sign-headline", "news-transfer-in-body"),
+                (true, true) => ("news-loan-in-headline", "news-transfer-in-body"),
+                (false, false) => ("news-transfer-out-headline", "news-transfer-out-body"),
+                (false, true) => ("news-loan-out-headline", "news-transfer-out-body"),
+            };
+            self.state.push_news(
+                NewsCategory::Transfer,
+                tr(headline_key, &[("player", &player), ("club", other)]),
+                tr(body_key, &[("player", &player), ("club", other)]),
+            );
         }
     }
 
@@ -248,7 +286,7 @@ impl OpenCmApp {
 
     /// Attendance for a fixture from the competition's reputation
     /// and the weather over the ground.
-    fn fixture_attendance(&self, fixture: &Fixture, weather: &MatchWeather) -> u32 {
+    pub(super) fn fixture_attendance(&self, fixture: &Fixture, weather: &MatchWeather) -> u32 {
         let reputation = self
             .provider
             .as_ref()
@@ -261,23 +299,20 @@ impl OpenCmApp {
         cm0102_core::crowd(reputation, weather, fixture.seed())
     }
 
-    /// Simulate one fixture through the match engine, serve bans,
-    /// record the score and report, and apply season discipline.
-    /// Used for the managed club's matches (match day, holiday).
-    pub(super) fn simulate_and_record(&mut self, fixture: &Fixture) -> MatchResult {
+    /// Engine context for a fixture: squads, strengths, weather,
+    /// referee and the managed club's instructions.
+    pub(super) fn match_context(&self, fixture: &Fixture) -> MatchContext {
         let (home_players, home_subs) = self.match_squad(fixture.home_club_id);
         let (away_players, away_subs) = self.match_squad(fixture.away_club_id);
         let (home_mentality, home_bus) = self.side_instructions(fixture.home_club_id);
         let (away_mentality, away_bus) = self.side_instructions(fixture.away_club_id);
-        let weather = self.fixture_weather(fixture);
-        let referee = self.fixture_referee(fixture);
-        let context = MatchContext {
+        MatchContext {
             home_club_id: fixture.home_club_id,
             away_club_id: fixture.away_club_id,
             date: fixture.date,
             seed: fixture.seed(),
-            weather,
-            referee,
+            weather: self.fixture_weather(fixture),
+            referee: self.fixture_referee(fixture),
             home_avg_ca: self.team_avg_ca(fixture.home_club_id),
             away_avg_ca: self.team_avg_ca(fixture.away_club_id),
             home_players,
@@ -290,7 +325,14 @@ impl OpenCmApp {
             away_men_behind_ball: away_bus,
             // League fixtures only until cups land.
             extra_time_if_level: false,
-        };
+        }
+    }
+
+    /// Simulate one fixture through the match engine, serve bans,
+    /// record the score and report, and apply season discipline.
+    /// Used for instant matches (AI fixtures, holiday).
+    pub(super) fn simulate_and_record(&mut self, fixture: &Fixture) -> MatchResult {
+        let context = self.match_context(fixture);
         let mut outcome = SimulationEngine.simulate(&context);
         outcome.attendance = Some(self.fixture_attendance(fixture, &outcome.weather));
         self.serve_match_bans(fixture.home_club_id, fixture.away_club_id);

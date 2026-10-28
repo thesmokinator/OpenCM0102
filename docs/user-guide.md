@@ -20,7 +20,9 @@ The window follows three phases. Setup and hub share a slim shell
 actions, while developer utilities (Data Explorer, Database
 Editor) and Disconnect live in a separate Tools section. Before
 any data exists, a full-bleed splash (our own pixel art) replaces
-banner and hub. Once a career starts, the game shell takes over:
+banner and hub. The Setup Game hub keeps the pixel-art stadium as its backdrop
+behind the scrollable content. Once a career starts, the game
+shell takes over:
 fixed info headerbar on top (manager, club, date, next match,
 Menu), scrollable center with the section sidebar on the left,
 and a fixed action footerbar at the bottom with one primary
@@ -130,8 +132,11 @@ tag, and your eleven; **Play Match** runs from the footer, then
 the live commentary plays (speed control in the footer, from Very
 Slow to Very Fast around the Medium cfg timing; goals and red
 cards fire animated banners) with a half-time pause up to the
-full-time report with attendance, stats and ratings. Speed only
-paces the reveal — the result is fixed at kick-off.
+full-time report with attendance, stats and ratings. The reveal
+drives a live simulation: **Pause** holds both, and at half time
+or while paused the team-talk panel offers substitutions and a
+mentality switch for your club — changes apply at once and reshape
+the rest of the match. Speed only paces the telling.
 Frozen or waterlogged pitches can postpone a fixture by a week,
 with a news item telling you. Other due fixtures
 are simulated automatically with a results roundup in your inbox;

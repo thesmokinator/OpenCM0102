@@ -104,6 +104,43 @@ impl DayEventSource for NoEvents {
     }
 }
 
+/// International transfer-window deadlines as an event feed: stops
+/// Continue on the documented deadline days.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TransferWindows;
+
+impl DayEventSource for TransferWindows {
+    fn events_for(&self, date: GameDate, _managed_club_id: Option<u32>) -> DayEvents {
+        DayEvents {
+            deadline_today: crate::transfers::is_window_deadline(date),
+            ..DayEvents::default()
+        }
+    }
+}
+
+/// Two event feeds OR-ed together: every slice set by either side
+/// marks the day.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Combined<A: DayEventSource, B: DayEventSource> {
+    /// First feed.
+    pub first: A,
+    /// Second feed.
+    pub second: B,
+}
+
+impl<A: DayEventSource, B: DayEventSource> DayEventSource for Combined<A, B> {
+    fn events_for(&self, date: GameDate, managed_club_id: Option<u32>) -> DayEvents {
+        let first = self.first.events_for(date, managed_club_id);
+        let second = self.second.events_for(date, managed_club_id);
+        DayEvents {
+            own_match: first.own_match || second.own_match,
+            inbox_items: first.inbox_items + second.inbox_items,
+            offer_responses: first.offer_responses + second.offer_responses,
+            deadline_today: first.deadline_today || second.deadline_today,
+        }
+    }
+}
+
 /// Simulate one day: advance the date, then run the daily pipeline
 /// stages in order for the new current date. Stage order is still
 /// open (see `docs/season.md`); engines hook their stage in here as
@@ -377,6 +414,26 @@ mod tests {
         assert!(state.permits.is_empty());
         assert_eq!(state.regen_due, 0);
         assert!(state.board_confidence.history.is_empty());
+    }
+
+    /// Combined feeds OR every slice; deadlines stop Continue on
+    /// the documented days.
+    #[test]
+    fn combined_feeds_stop_on_deadlines() {
+        use crate::schedule::Schedule;
+
+        let source = Combined {
+            first: Schedule::default(),
+            second: TransferWindows,
+        };
+        let deadline = GameDate::new(2001, 7, 31);
+        let events = source.events_for(deadline, None);
+        assert!(events.deadline_today);
+        assert!(!events.own_match);
+        let rules = ContinueRules::default();
+        assert_eq!(stops_for(&rules, &events), Some(StopReason::Deadline));
+        let plain = source.events_for(GameDate::new(2001, 8, 1), None);
+        assert_eq!(stops_for(&rules, &plain), None);
     }
 
     #[test]

@@ -32,8 +32,9 @@ use rand_chacha::ChaCha8Rng;
 
 /// Base chance probability per team per minute, in permille.
 /// Rebalanced for the duel gate (roughly half of all chances end in
-/// a tackle), so post-duel shot volume matches the calibrated range.
-const CHANCE_PER_MILLE: u32 = 88;
+/// a tackle), so post-duel shot volume matches the calibrated range
+/// (~25 total shots per match).
+const CHANCE_PER_MILLE: u32 = 132;
 /// Strength adjustment bounds applied to the chance rate.
 const RATE_CLAMP: (f32, f32) = (0.7, 1.4);
 /// Chance-rate multiplier per team mentality.
@@ -57,7 +58,8 @@ const ONE_ON_ONE_RANGE: u32 = 12;
 /// Flat bonus added to the shooter's side of the goal test.
 const SHOT_BONUS: i32 = 30;
 /// Extra penalty added to the keeper's side of the goal test.
-const KEEPER_BONUS: i32 = 40;
+/// Calibrated so roughly three in ten shots on target score.
+const KEEPER_BONUS: i32 = 45;
 /// Quadratic distance falloff divisor: penalty = metres² / this.
 const FALLOFF_DIVISOR: i32 = 8;
 /// Penalty-kick probability per match, in percent.
@@ -192,7 +194,7 @@ impl Tracker {
 }
 
 /// One side's evolving match state.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 struct Side {
     /// Players on the pitch, shirt order.
     pitch: Vec<Tracker>,
@@ -281,65 +283,12 @@ impl Side {
 pub struct SimulationEngine;
 
 impl MatchEngine for SimulationEngine {
+    /// Full instant simulation: a live match with the interval
+    /// released, played to the final whistle untouched.
     fn simulate(&self, ctx: &MatchContext) -> MatchResult {
-        let mut rng = ChaCha8Rng::seed_from_u64(ctx.seed);
-        let mut result = MatchResult {
-            home_goals: 0,
-            away_goals: 0,
-            events: Vec::new(),
-            stats: MatchStats::default(),
-            ratings: Vec::new(),
-            shootout: None,
-            injuries: Vec::new(),
-            first_half_end: 45,
-            timeline: Vec::new(),
-            weather: ctx.weather,
-            referee: Some(ctx.referee.clone()),
-            attendance: None,
-        };
-        let mut events: Vec<MatchEvent> = Vec::new();
-        let mut sides = [
-            Side::new(&ctx.home_players, &ctx.home_subs),
-            Side::new(&ctx.away_players, &ctx.away_subs),
-        ];
-        let (mut minutes, first_half_end) = full_time(&mut rng);
-        result.first_half_end = first_half_end;
-        events.push(whistle(1, EventKind::Kickoff, 52));
-        play_period(&mut rng, ctx, &mut sides, 1, minutes, &mut result, &mut events);
-        if roll(&mut rng, 100) < PENALTY_PERCENT {
-            let minute = roll(&mut rng, minutes) + 1;
-            resolve_penalty(&mut rng, &mut sides, minute, &mut result, &mut events);
-        }
-        events.push(whistle(first_half_end, EventKind::HalfTime, 433));
-        if ctx.extra_time_if_level && result.home_goals == result.away_goals {
-            play_period(
-                &mut rng,
-                ctx,
-                &mut sides,
-                minutes + 1,
-                minutes + 2 * EXTRA_TIME_HALF,
-                &mut result,
-                &mut events,
-            );
-            minutes += 2 * EXTRA_TIME_HALF;
-            if result.home_goals == result.away_goals {
-                result.shootout = Some(shootout(&mut rng, &sides, minutes + 1, &mut events));
-            }
-        }
-        sides[0].conceded = result.away_goals;
-        sides[1].conceded = result.home_goals;
-        sides[0].won = result.home_goals > result.away_goals;
-        sides[1].won = result.away_goals > result.home_goals;
-        result.stats = fold_timeline(&result.timeline);
-        for (home, side) in [&sides[0], &sides[1]].into_iter().enumerate() {
-            for tracker in side.pitch.iter().chain(side.departed.iter()) {
-                result.ratings.push(rate(tracker, side, home == 0, minutes));
-            }
-        }
-        events.push(whistle(minutes, EventKind::FullTime, 193));
-        events.sort_by_key(|event| event.minute);
-        result.events = events;
-        result
+        let mut live = LiveMatch::new(ctx.clone());
+        live.open_second_half();
+        live.finish()
     }
 }
 
@@ -351,39 +300,359 @@ fn full_time(rng: &mut ChaCha8Rng) -> (u32, u32) {
     (90 + first_half + second_half, 45 + first_half)
 }
 
-/// Play minutes `first..=last` for both sides: bookings, injuries,
-/// planned subs and chances.
+/// One live match: a fixture simulated minute by minute with
+/// intervention points. The reveal drives the sim — pausing the
+/// reveal pauses the sim — so half-time talks, pauses and
+/// substitutions change what happens next instead of narrating a
+/// fixed report.
+#[derive(Debug, Clone)]
+pub struct LiveMatch {
+    /// Fixture context; mentality and shape edits land here.
+    ctx: MatchContext,
+    /// Deterministic stream for this fixture.
+    rng: ChaCha8Rng,
+    /// Both sides' evolving match state.
+    sides: [Side; 2],
+    /// Minutes played so far.
+    cursor: u32,
+    /// Regulation end (extended for extra time).
+    minutes: u32,
+    /// Minute the first half ends (45 plus stoppage).
+    first_half_end: u32,
+    /// True once the second half is released for simulation.
+    second_half_open: bool,
+    /// Spot-kick minute, pre-decided like the regulation draw.
+    penalty_minute: Option<u32>,
+    /// Shootout score, when a cup tie needed one.
+    shootout: Option<Shootout>,
+    /// Incidents in chronological order.
+    events: Vec<MatchEvent>,
+    /// Per-minute counters in match order.
+    timeline: Vec<MinuteStats>,
+    /// Match injuries with layoffs.
+    injuries: Vec<MatchInjury>,
+    /// Goals so far.
+    score: (u32, u32),
+    /// Crowd count, set by the caller once known.
+    attendance: Option<u32>,
+    /// True once the final whistle (or shootout) is played.
+    finished: bool,
+    /// True once extra time was added.
+    extra_added: bool,
+}
+
+/// One named player on a live teamsheet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RosterEntry {
+    /// Stable identifier from the source data.
+    pub id: u32,
+    /// Display name.
+    pub name: String,
+    /// Booked.
+    pub yellow: bool,
+    /// Goals scored.
+    pub goals: u8,
+}
+
+impl LiveMatch {
+    /// Start a fixture: full-time draws plus the kick-off incident.
+    /// Nothing else is played until the reveal pulls the sim.
+    pub fn new(ctx: MatchContext) -> Self {
+        let mut rng = ChaCha8Rng::seed_from_u64(ctx.seed);
+        let (minutes, first_half_end) = full_time(&mut rng);
+        let penalty_minute = if roll(&mut rng, 100) < PENALTY_PERCENT {
+            Some(roll(&mut rng, minutes) + 1)
+        } else {
+            None
+        };
+        let sides = [
+            Side::new(&ctx.home_players, &ctx.home_subs),
+            Side::new(&ctx.away_players, &ctx.away_subs),
+        ];
+        Self {
+            ctx,
+            rng,
+            sides,
+            cursor: 0,
+            minutes,
+            first_half_end,
+            second_half_open: false,
+            penalty_minute,
+            shootout: None,
+            events: vec![whistle(1, EventKind::Kickoff, 52)],
+            timeline: Vec::new(),
+            injuries: Vec::new(),
+            score: (0, 0),
+            attendance: None,
+            finished: false,
+            extra_added: false,
+        }
+    }
+
+    /// Record the crowd once the caller knows it.
+    pub fn set_attendance(&mut self, attendance: u32) {
+        self.attendance = Some(attendance);
+    }
+
+    /// Minutes played so far.
+    pub fn cursor(&self) -> u32 {
+        self.cursor
+    }
+
+    /// Current score.
+    pub fn score(&self) -> (u32, u32) {
+        self.score
+    }
+
+    /// True once the final whistle (or shootout) is played.
+    pub fn is_finished(&self) -> bool {
+        self.finished
+    }
+
+    /// Incidents played so far (for reveal bookkeeping).
+    pub fn incident_count(&self) -> usize {
+        self.events.len()
+    }
+
+    /// Release the second half for simulation after the interval.
+    pub fn open_second_half(&mut self) {
+        self.second_half_open = true;
+    }
+
+    /// True while the sim waits at the interval: the first half is
+    /// played and the second not yet released.
+    pub fn capped_for_interval(&self) -> bool {
+        !self.finished && !self.second_half_open && self.cursor >= self.first_half_end
+    }
+
+    /// Substitutions remaining for one side.
+    pub fn subs_left(&self, home: bool) -> u32 {
+        MAX_SUBS.saturating_sub(self.sides[usize::from(!home)].subs_used)
+    }
+
+    /// Teamsheet of one side: (pitch, bench) in shirt order.
+    pub fn roster(&self, home: bool) -> (Vec<RosterEntry>, Vec<RosterEntry>) {
+        let side = &self.sides[usize::from(!home)];
+        let pitch = side
+            .pitch
+            .iter()
+            .map(|tracker| RosterEntry {
+                id: tracker.player.id,
+                name: tracker.player.name.clone(),
+                yellow: tracker.yellow,
+                goals: tracker.goals,
+            })
+            .collect();
+        let bench = side
+            .bench
+            .iter()
+            .map(|player| RosterEntry {
+                id: player.id,
+                name: player.name.clone(),
+                yellow: false,
+                goals: 0,
+            })
+            .collect();
+        (pitch, bench)
+    }
+
+    /// Substitute the named player off for the strongest remaining
+    /// substitute (the engine's standing rule). Returns the incoming
+    /// player's name, or `None` when the id is not on the pitch or
+    /// no substitution is available. Changes apply at the current
+    /// sim minute.
+    pub fn substitute(&mut self, home: bool, out_id: u32) -> Option<String> {
+        let index = usize::from(!home);
+        let position = self.sides[index]
+            .pitch
+            .iter()
+            .position(|tracker| tracker.player.id == out_id)?;
+        let minute = self.cursor.max(1);
+        let (_, incoming) = self.sides[index].substitute(position, minute)?;
+        self.events.push(MatchEvent {
+            minute,
+            home,
+            kind: EventKind::Sub,
+            player: incoming.clone(),
+            other: self.last_departed_name(index),
+            commentary_id: Some(27),
+            distance_yards: None,
+        });
+        Some(incoming)
+    }
+
+    /// Name of the most recently departed player on one side, for
+    /// substitution announcements.
+    fn last_departed_name(&self, index: usize) -> Option<String> {
+        self.sides[index]
+            .departed
+            .last()
+            .map(|tracker| tracker.player.name.clone())
+    }
+
+    /// Change one side's mentality mid-match.
+    pub fn set_mentality(&mut self, home: bool, mentality: Mentality) {
+        if home {
+            self.ctx.home_mentality = mentality;
+        } else {
+            self.ctx.away_mentality = mentality;
+        }
+    }
+
+    /// Change whether one side keeps men behind the ball.
+    pub fn set_behind_ball(&mut self, home: bool, behind: bool) {
+        if home {
+            self.ctx.home_men_behind_ball = behind;
+        } else {
+            self.ctx.away_men_behind_ball = behind;
+        }
+    }
+
+    /// Current instructions of one side: mentality plus the
+    /// men-behind-ball flag.
+    pub fn instructions(&self, home: bool) -> (Mentality, bool) {
+        if home {
+            (self.ctx.home_mentality, self.ctx.home_men_behind_ball)
+        } else {
+            (self.ctx.away_mentality, self.ctx.away_men_behind_ball)
+        }
+    }
+
+    /// Play until more than `count` incidents exist, the interval
+    /// cap, or the match end — whichever comes first.
+    pub fn play_until_incident(&mut self, count: usize) {
+        while self.events.len() <= count && self.may_advance() {
+            self.step();
+        }
+    }
+
+    /// True while another minute may be played: before the interval
+    /// cap, or any time once the second half is released.
+    fn may_advance(&self) -> bool {
+        !self.finished && (self.cursor < self.first_half_end || self.second_half_open)
+    }
+
+    /// Play one minute for both sides: bookings, injuries, planned
+    /// subs, ambient counters and chances, plus the spot kick,
+    /// interval and full-time markers when their minute arrives.
+    fn step(&mut self) {
+        let minute = self.cursor + 1;
+        let mut played = MinuteStats::default();
+        step_minute(
+            &mut self.rng,
+            &self.ctx,
+            &mut self.sides,
+            minute,
+            &mut self.score,
+            &mut self.injuries,
+            &mut self.events,
+            &mut played,
+        );
+        self.timeline.push(played);
+        if self.penalty_minute == Some(minute) {
+            resolve_penalty(
+                &mut self.rng,
+                &mut self.sides,
+                minute,
+                &mut self.score,
+                &mut self.timeline,
+                &mut self.events,
+            );
+        }
+        if minute == self.first_half_end {
+            self.events.push(whistle(minute, EventKind::HalfTime, 433));
+        }
+        self.cursor = minute;
+        if minute == self.minutes {
+            self.close_regulation();
+        }
+    }
+
+    /// Close regulation: extra time when a cup tie is level,
+    /// shootout when still level after it, else the final whistle.
+    fn close_regulation(&mut self) {
+        let level = self.score.0 == self.score.1;
+        if self.ctx.extra_time_if_level && level && !self.extra_added {
+            self.minutes += 2 * EXTRA_TIME_HALF;
+            self.extra_added = true;
+        } else if self.ctx.extra_time_if_level && level {
+            let decided = shootout(&mut self.rng, &self.sides, self.cursor + 1, &mut self.events);
+            self.shootout = Some(decided);
+            self.events
+                .push(whistle(self.cursor, EventKind::FullTime, 193));
+            self.finished = true;
+        } else {
+            self.events
+                .push(whistle(self.cursor, EventKind::FullTime, 193));
+            self.finished = true;
+        }
+    }
+
+    /// Current snapshot: goals, incidents, folded stats and
+    /// provisional ratings for the live tabs.
+    pub fn snapshot(&mut self) -> MatchResult {
+        let mut events = self.events.clone();
+        events.sort_by_key(|event| event.minute);
+        self.sides[0].conceded = self.score.1;
+        self.sides[1].conceded = self.score.0;
+        self.sides[0].won = self.score.0 > self.score.1;
+        self.sides[1].won = self.score.1 > self.score.0;
+        let mut ratings = Vec::new();
+        for (home, side) in [&self.sides[0], &self.sides[1]].into_iter().enumerate() {
+            for tracker in side.pitch.iter().chain(side.departed.iter()) {
+                ratings.push(rate(tracker, side, home == 0, self.cursor));
+            }
+        }
+        MatchResult {
+            home_goals: self.score.0,
+            away_goals: self.score.1,
+            events,
+            stats: fold_timeline(&self.timeline),
+            ratings,
+            shootout: self.shootout,
+            injuries: self.injuries.clone(),
+            first_half_end: self.first_half_end,
+            timeline: self.timeline.clone(),
+            weather: self.ctx.weather,
+            referee: Some(self.ctx.referee.clone()),
+            attendance: self.attendance,
+        }
+    }
+
+    /// Play to the final whistle and assemble the full report.
+    pub fn finish(mut self) -> MatchResult {
+        self.second_half_open = true;
+        while !self.finished {
+            self.step();
+        }
+        self.snapshot()
+    }
+}
+
+/// Play one minute for both sides: bookings, injuries, planned subs
+/// and chances. Single-minute slip for live matches; full matches
+/// loop it through [`LiveMatch`].
 #[allow(clippy::too_many_arguments)]
-fn play_period(
+fn step_minute(
     rng: &mut ChaCha8Rng,
     ctx: &MatchContext,
     sides: &mut [Side; 2],
-    first: u32,
-    last: u32,
-    result: &mut MatchResult,
+    minute: u32,
+    score: &mut (u32, u32),
+    injuries: &mut Vec<MatchInjury>,
     events: &mut Vec<MatchEvent>,
+    played: &mut MinuteStats,
 ) {
-    for minute in first..=last {
-        let mut played = MinuteStats::default();
-        for home in [true, false] {
-            // sides[0] is home: true -> 0.
-            let index = usize::from(!home);
-            maybe_book(
-                rng,
-                &mut sides[index],
-                home,
-                minute,
-                ctx.referee.strictness,
-                events,
-            );
-            maybe_injure(rng, &mut sides[index], home, minute, events, result);
-            maybe_substitute(&mut sides[index], home, minute, events);
-            ambient_minute(rng, &mut sides[index], &mut played, home);
-            if chance_falls(rng, ctx, sides, home) {
-                resolve_chance(rng, sides, home, minute, result, &mut played, events);
-            }
+    for home in [true, false] {
+        // sides[0] is home: true -> 0.
+        let index = usize::from(!home);
+        maybe_book(rng, &mut sides[index], home, minute, ctx.referee.strictness, events);
+        maybe_injure(rng, &mut sides[index], home, minute, events, injuries);
+        maybe_substitute(&mut sides[index], home, minute, events);
+        ambient_minute(rng, &mut sides[index], played, home);
+        if chance_falls(rng, ctx, sides, home) {
+            resolve_chance(rng, sides, home, minute, score, played, events);
         }
-        result.timeline.push(played);
     }
 }
 
@@ -693,7 +962,7 @@ fn maybe_injure(
     home: bool,
     minute: u32,
     events: &mut Vec<MatchEvent>,
-    result: &mut MatchResult,
+    injuries: &mut Vec<MatchInjury>,
 ) {
     if side.pitch.is_empty() || roll(rng, 1000) >= INJURY_PER_MILLE {
         return;
@@ -724,7 +993,7 @@ fn maybe_injure(
         commentary_id: Some(22),
         distance_yards: None,
     });
-    result.injuries.push(MatchInjury {
+    injuries.push(MatchInjury {
         player_id: victim.id,
         name: victim.name.clone(),
         home,
@@ -811,7 +1080,7 @@ fn resolve_chance(
     sides: &mut [Side; 2],
     home: bool,
     minute: u32,
-    result: &mut MatchResult,
+    score: &mut (u32, u32),
     played: &mut MinuteStats,
     events: &mut Vec<MatchEvent>,
 ) {
@@ -861,9 +1130,9 @@ fn resolve_chance(
         bump_shots(played, home, true);
         let (scored_home, scored_away) =
             score_goal(rng, sides, home, minute, &shooter.name, distance, events);
-        result.home_goals += scored_home;
-        result.away_goals += scored_away;
-    } else if roll(rng, 200) < winner.saturating_sub((falloff.max(0) / 3) as u32) {
+        score.0 += scored_home;
+        score.1 += scored_away;
+    } else if roll(rng, 200) < save_threshold(winner, falloff) {
         bump_shots(played, home, true);
         sides[attack].pitch[shooter_index].on_target += 1;
         let keeper = sides[defend]
@@ -901,6 +1170,13 @@ fn resolve_chance(
             distance_yards: Some(distance.min(u32::from(u16::MAX)) as u16),
         });
     }
+}
+
+/// Save-test threshold: twice the winning category roll minus a
+/// third of the distance falloff. Calibrated so about a third of
+/// all shots test the keeper.
+fn save_threshold(winner: u32, falloff: i32) -> u32 {
+    (winner.saturating_mul(2)).saturating_sub((falloff.max(0) / 3) as u32)
 }
 
 /// Commentary id for a saved shot by technique and distance.
@@ -1071,7 +1347,8 @@ fn resolve_penalty(
     rng: &mut ChaCha8Rng,
     sides: &mut [Side; 2],
     minute: u32,
-    result: &mut MatchResult,
+    score: &mut (u32, u32),
+    timeline: &mut [MinuteStats],
     events: &mut Vec<MatchEvent>,
 ) {
     let home = roll(rng, 2) == 0;
@@ -1090,11 +1367,11 @@ fn resolve_penalty(
     if roll(rng, 200) < bound(&taker, ATTR_PENALTIES) + PENALTY_BONUS {
         sides[side].pitch[taker_index].goals += 1;
         sides[side].pitch[taker_index].on_target += 1;
-        bump_penalty_shot(result, minute, home, true);
+        bump_penalty_shot(timeline, minute, home, true);
         if home {
-            result.home_goals += 1;
+            score.0 += 1;
         } else {
-            result.away_goals += 1;
+            score.1 += 1;
         }
         events.push(MatchEvent {
             minute,
@@ -1107,7 +1384,7 @@ fn resolve_penalty(
         });
     } else {
         sides[side].pitch[taker_index].missed_pen = true;
-        bump_penalty_shot(result, minute, home, false);
+        bump_penalty_shot(timeline, minute, home, false);
         events.push(MatchEvent {
             minute,
             home,
@@ -1131,9 +1408,9 @@ fn bump_shots(played: &mut MinuteStats, home: bool, on_target: bool) {
 }
 
 /// Count a retroactive penalty shot in its minute of the timeline.
-fn bump_penalty_shot(result: &mut MatchResult, minute: u32, home: bool, on_target: bool) {
+fn bump_penalty_shot(timeline: &mut [MinuteStats], minute: u32, home: bool, on_target: bool) {
     let index = minute.saturating_sub(1) as usize;
-    if let Some(played) = result.timeline.get_mut(index) {
+    if let Some(played) = timeline.get_mut(index) {
         bump_shots(played, home, on_target);
     }
 }
@@ -1291,6 +1568,74 @@ mod tests {
                 )
             })
             .count()
+    }
+
+    /// Progressive play with the interval released matches the
+    /// instant simulation exactly.
+    #[test]
+    fn live_progressive_matches_instant() {
+        for seed in [1, 7, 42, 99] {
+            let instant = SimulationEngine.simulate(&context(seed));
+            let mut live = LiveMatch::new(context(seed));
+            live.open_second_half();
+            let mut shown = 0;
+            while !live.is_finished() {
+                let before = live.incident_count();
+                live.play_until_incident(shown);
+                shown = before.max(shown);
+                if live.incident_count() == before {
+                    break;
+                }
+                shown = live.incident_count();
+            }
+            assert_eq!(live.finish(), instant, "seed {seed}");
+        }
+    }
+
+    /// Simulation caps at the interval until it is released.
+    #[test]
+    fn live_caps_at_half_time_until_released() {
+        let mut live = LiveMatch::new(context(5));
+        live.play_until_incident(10_000);
+        assert!(!live.is_finished());
+        let snapshot = live.snapshot();
+        assert!(snapshot.events.iter().all(|event| event.minute <= snapshot.first_half_end));
+        live.open_second_half();
+        let full = live.finish();
+        assert!(full.events.iter().any(|event| event.minute > full.first_half_end));
+    }
+
+    /// Half-time substitutions are deterministic and recorded.
+    #[test]
+    fn live_substitution_is_deterministic_and_recorded() {
+        let run_with_sub = || {
+            let mut live = LiveMatch::new(context(11));
+            live.play_until_incident(10_000);
+            let (pitch, _) = live.roster(true);
+            assert_eq!(pitch.len(), 11);
+            let out_id = pitch[5].id;
+            let incoming = live.substitute(true, out_id).expect("bench available");
+            assert_eq!(live.subs_left(true), MAX_SUBS - 1);
+            live.open_second_half();
+            (incoming, live.finish())
+        };
+        let (incoming, first) = run_with_sub();
+        let (_, second) = run_with_sub();
+        assert_eq!(first, second);
+        assert!(
+            first.events.iter().any(|event| {
+                event.kind == EventKind::Sub && event.player == incoming
+            }),
+            "substitution announced"
+        );
+    }
+
+    /// Unknown ids and exhausted benches refuse cleanly.
+    #[test]
+    fn live_substitution_refuses_gracefully() {
+        let mut live = LiveMatch::new(context(3));
+        assert_eq!(live.substitute(true, 999_999), None);
+        assert_eq!(live.substitute(false, 999_999), None);
     }
 
     /// The same seed always produces the same result.

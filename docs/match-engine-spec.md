@@ -36,6 +36,16 @@ balanced.
 - Shots carry a minute, a scorer and variants (penalty, own goal);
   team shot counts track shots and shots on target.
 
+## Live simulation (implemented)
+
+`cm0102-match` `LiveMatch` simulates minute by minute with
+intervention points: the reveal pulls the sim (pausing the reveal
+pauses the sim), the first half caps at the interval until
+released, and substitutions (strongest bench on, three per side),
+mentality and shape edits apply at the current sim minute with an
+announced incident. Untouched full runs match the instant engine
+exactly. AI fixtures and holidays keep the instant path.
+
 ## Match record (implemented)
 
 - Event set: goals with minute and scorer, scored and missed
@@ -57,8 +67,10 @@ balanced.
   drain condition by half a small drawn value per shot; the chance
   rate was rebalanced for the gate so post-duel shot volume holds.
   Pitch-grid bands (260/376) and the one-in-ten special-event gate
-  ship as tested helpers awaiting the grid model. Exact rating and
-  man-of-the-match writers stay open.
+  ship as tested helpers awaiting the grid model. Measured
+  calibration over 2,000 test-eleven matches: 2.63 goals, 24.8
+  shots, 9.2 on target, 10.6% conversion — in the real-football
+  range. Exact rating and man-of-the-match writers stay open.
 - Suspensions and injury layoffs from match incidents are not yet
   applied to the season; tactics, morale and condition weights are
   still open.

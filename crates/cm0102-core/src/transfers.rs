@@ -37,6 +37,23 @@ pub fn holds_permit(store: &[PermitRecord], player_id: u32) -> bool {
     store.iter().any(|record| record.player_id == player_id)
 }
 
+/// True inside the documented international windows (1–31 July and
+/// 15 December–15 January). Per-nation dates stay open.
+pub fn in_transfer_window(date: GameDate) -> bool {
+    match (date.month, date.day) {
+        (7, _) => true,
+        (12, day) => day >= 15,
+        (1, day) => day <= 15,
+        _ => false,
+    }
+}
+
+/// True on the documented international deadline days (31 July and
+/// 15 January): the deadline-day flow stops Continue here.
+pub fn is_window_deadline(date: GameDate) -> bool {
+    (date.month == 7 && date.day == 31) || (date.month == 1 && date.day == 15)
+}
+
 /// A permit is required exactly when the destination nation requires
 /// one and none of the player's nationalities is exempt.
 pub fn permit_required(
@@ -173,6 +190,42 @@ impl SetupEvent {
             SetupEvent::Loan { start, .. } => *start,
         }
     }
+
+    /// Club the player moves from.
+    pub fn from_club(&self) -> &str {
+        match self {
+            SetupEvent::FutureTransfer { from_club, .. } => from_club,
+            SetupEvent::Loan { from_club, .. } => from_club,
+        }
+    }
+
+    /// Club the player moves to.
+    pub fn to_club(&self) -> &str {
+        match self {
+            SetupEvent::FutureTransfer { to_club, .. } => to_club,
+            SetupEvent::Loan { to_club, .. } => to_club,
+        }
+    }
+
+    /// Display name from the three identifying name parts,
+    /// skipping blanks.
+    pub fn player_name(&self) -> String {
+        let parts: &[String] = match self {
+            SetupEvent::FutureTransfer { player, .. } => player,
+            SetupEvent::Loan { player, .. } => player,
+        };
+        parts
+            .iter()
+            .filter(|part| !part.is_empty())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// True for loan spells (players return at the end date).
+    pub fn is_loan(&self) -> bool {
+        matches!(self, SetupEvent::Loan { .. })
+    }
 }
 
 /// Parse the quoted-command script lines of `player_setup.cfg`,
@@ -266,6 +319,22 @@ fn tokenize(line: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// Windows cover July and mid-December to mid-January, with
+    /// deadline days at each window's end.
+    #[test]
+    fn windows_match_documented_dates() {
+        assert!(in_transfer_window(GameDate::new(2001, 7, 1)));
+        assert!(in_transfer_window(GameDate::new(2001, 7, 31)));
+        assert!(in_transfer_window(GameDate::new(2001, 12, 15)));
+        assert!(in_transfer_window(GameDate::new(2002, 1, 15)));
+        assert!(!in_transfer_window(GameDate::new(2001, 8, 1)));
+        assert!(!in_transfer_window(GameDate::new(2001, 12, 14)));
+        assert!(!in_transfer_window(GameDate::new(2002, 1, 16)));
+        assert!(is_window_deadline(GameDate::new(2001, 7, 31)));
+        assert!(is_window_deadline(GameDate::new(2002, 1, 15)));
+        assert!(!is_window_deadline(GameDate::new(2001, 7, 30)));
+    }
+
     /// Permits are required only for flagged destinations without an
     /// exempt nationality.
     #[test]
@@ -346,6 +415,30 @@ mod tests {
         assert!(!holds_permit(&store, 1));
         assert_eq!(store.len(), 2);
         assert!(!remove_permit(&mut store, 99));
+    }
+
+    /// Accessors expose clubs, display names and loan status.
+    #[test]
+    fn setup_accessors_read_event_fields() {
+        let transfer = SetupEvent::FutureTransfer {
+            player: ["Steinar".to_string(), String::new(), "Pedersen".to_string()],
+            from_club: "A".to_string(),
+            to_club: "B".to_string(),
+            date: GameDate::new(2001, 12, 1),
+        };
+        assert_eq!(transfer.from_club(), "A");
+        assert_eq!(transfer.to_club(), "B");
+        assert_eq!(transfer.player_name(), "Steinar Pedersen");
+        assert!(!transfer.is_loan());
+        let loan = SetupEvent::Loan {
+            player: ["X".to_string(), "Y".to_string(), "Z".to_string()],
+            from_club: "C".to_string(),
+            to_club: "D".to_string(),
+            start: GameDate::new(2001, 7, 1),
+            end: GameDate::new(2002, 6, 30),
+        };
+        assert!(loan.is_loan());
+        assert_eq!(loan.player_name(), "X Y Z");
     }
 
     /// Both documented script shapes parse with trailing numbers

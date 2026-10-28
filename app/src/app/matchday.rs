@@ -4,20 +4,22 @@
 //! Match-day flow: pre-match build-up, live commentary reveal with a
 //! half-time pause, and the full-time report. Continue enters this
 //! screen on match days; the match cannot be skipped, only played.
-//! Mid-match tactical changes are not supported yet: the engine
-//! resolves the whole fixture at kick-off and the live view reveals
-//! the recorded incidents progressively.
+//! The reveal drives a live simulation minute by minute, so the
+//! half-time team talk, pauses and substitutions change what
+//! happens next instead of narrating a fixed report.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use cm0102_core::{EventKind, Fixture, MatchEvent, MatchResult, MatchStats, PlayerRating};
+use cm0102_core::{
+    EventKind, Fixture, FixtureResult, MatchEvent, MatchResult, MatchStats, Mentality, PlayerRating,
+};
+use cm0102_match::LiveMatch;
 
 use super::*;
 use crate::i18n::{t, tr};
 
 /// How fast live incidents are revealed. Display pacing only:
-/// the engine pre-simulates the whole match at kick-off, so
 /// speed never changes what happens, only how fast it is told.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CommentarySpeed {
@@ -88,7 +90,11 @@ pub(super) enum MatchPhase {
 pub struct MatchDayState {
     /// The fixture being played.
     pub fixture: Fixture,
-    /// Engine report once kicked off, `None` before kick-off.
+    /// Live simulation once kicked off, `None` before kick-off.
+    pub live: Option<LiveMatch>,
+    /// Display pause: the reveal (and with it the sim) holds.
+    pub paused: bool,
+    /// Engine snapshot once kicked off, `None` before kick-off.
     pub report: Option<MatchResult>,
     /// Incidents revealed so far in the live view.
     pub revealed: usize,
@@ -197,6 +203,8 @@ impl MatchDayState {
     pub fn pre_match(fixture: Fixture) -> Self {
         Self {
             fixture,
+            live: None,
+            paused: false,
             report: None,
             revealed: 0,
             speed: CommentarySpeed::Medium,
@@ -253,17 +261,18 @@ impl MatchDayState {
             .fold((0, 0), |(h, a), (eh, ea)| (h + eh, a + ea))
     }
 
-    /// Index of the first second-half incident: reveal pauses here
-    /// for half time.
-    pub fn second_half_index(&self) -> usize {
-        let Some(report) = &self.report else {
-            return 0;
-        };
-        report
-            .events
-            .iter()
-            .position(|event| event.minute > report.first_half_end)
-            .unwrap_or(report.events.len())
+    /// True at the interval: the sim waits for release and every
+    /// played incident is revealed.
+    pub fn at_half_time(&self) -> bool {
+        if self.second_half {
+            return false;
+        }
+        let capped = self.live.as_ref().is_some_and(|live| live.capped_for_interval());
+        let drained = self
+            .report
+            .as_ref()
+            .is_some_and(|report| self.revealed >= report.events.len());
+        capped && drained
     }
 
     /// Current match minute from the last revealed incident.
@@ -636,27 +645,105 @@ impl OpenCmApp {
         let Some(day) = self.shell.match_day.as_ref() else {
             return MatchPhase::Hub;
         };
-        let Some(report) = day.report.as_ref() else {
+        if day.report.is_none() {
             return MatchPhase::Prematch;
-        };
+        }
+        if day.at_half_time() {
+            return MatchPhase::HalfTime;
+        }
         if day.is_full_time() {
             return MatchPhase::FullTime;
         }
-        let ht_index = day.second_half_index();
-        let at_half_time = !day.second_half
-            && ht_index > 0
-            && day.revealed >= ht_index
-            && report.events.len() > ht_index;
-        if at_half_time {
-            MatchPhase::HalfTime
-        } else {
-            MatchPhase::Live
+        MatchPhase::Live
+    }
+
+    /// Half-time team talk and pause panel: substitutions and
+    /// mentality for the managed club. Changes apply to the live
+    /// sim at once and reshape what happens next.
+    fn show_intervention(&mut self, ui: &mut egui::Ui) {
+        let Some(managed) = self.state.managed_club_id else {
+            return;
+        };
+        let Some(day) = self.shell.match_day.as_ref() else {
+            return;
+        };
+        let home = day.fixture.home_club_id == managed;
+        let Some(live) = day.live.as_ref() else {
+            return;
+        };
+        let (pitch, bench) = live.roster(home);
+        let subs_left = live.subs_left(home);
+        let (mentality, _) = live.instructions(home);
+        ui.heading(t("matchday-team-talk"));
+        let mut picked = None;
+        ui.horizontal(|ui| {
+            ui.label(t("matchday-mentality"));
+            for (candidate, key) in [
+                (Mentality::Attacking, "matchday-attacking"),
+                (Mentality::Normal, "matchday-normal"),
+                (Mentality::Defensive, "matchday-defensive"),
+            ] {
+                if ui.selectable_label(mentality == candidate, t(key)).clicked() {
+                    picked = Some(candidate);
+                }
+            }
+        });
+        if let Some(next) = picked {
+            if let Some(live) = self
+                .shell
+                .match_day
+                .as_mut()
+                .and_then(|day| day.live.as_mut())
+            {
+                live.set_mentality(home, next);
+            }
+            self.resimulate_to_revealed();
+        }
+        ui.add_space(4.0);
+        if subs_left == 0 || bench.is_empty() {
+            ui.label(t("matchday-no-subs"));
+            return;
+        }
+        ui.label(tr(
+            "matchday-subs-left",
+            &[("n", &subs_left.to_string())],
+        ));
+        let mut sub_off = None;
+        egui::Grid::new("matchday_subs").show(ui, |ui| {
+            for player in &pitch {
+                let mut name = player.name.clone();
+                if player.goals > 0 {
+                    name.push_str(&format!(" ({})", player.goals));
+                }
+                if player.yellow {
+                    name.push_str(" (y)");
+                }
+                ui.label(name);
+                if ui.button(t("matchday-sub-off")).clicked() {
+                    sub_off = Some(player.id);
+                }
+                ui.end_row();
+            }
+        });
+        if let Some(out_id) = sub_off {
+            if let Some(live) = self
+                .shell
+                .match_day
+                .as_mut()
+                .and_then(|day| day.live.as_mut())
+            {
+                live.substitute(home, out_id);
+            }
+            self.resimulate_to_revealed();
         }
     }
 
     /// Dismiss the half-time pause and resume the reveal.
     pub(super) fn start_second_half(&mut self) {
         if let Some(day) = self.shell.match_day.as_mut() {
+            if let Some(live) = day.live.as_mut() {
+                live.open_second_half();
+            }
             day.second_half = true;
             day.last_tick = None;
         }
@@ -818,7 +905,8 @@ impl OpenCmApp {
 
     /// Resolve the fixture at kick-off: simulate, record, apply
     /// discipline, snapshot pre-match bans and injuries for news,
-    /// and render the commentary deterministically.
+    /// and start the live simulation. Nothing is recorded yet: the
+    /// result lands in the schedule at full time.
     pub(super) fn kick_off(&mut self) {
         let Some(day) = self.shell.match_day.as_mut() else {
             return;
@@ -834,21 +922,29 @@ impl OpenCmApp {
         };
         day.pre_suspensions = self.state.suspensions.clone();
         day.pre_injuries = self.state.injuries.clone();
-        let outcome = self.simulate_and_record(&fixture);
+        self.serve_match_bans(fixture.home_club_id, fixture.away_club_id);
+        let context = self.match_context(&fixture);
+        let attendance = self.fixture_attendance(&fixture, &context.weather);
+        let mut live = LiveMatch::new(context);
+        live.set_attendance(attendance);
+        live.play_until_incident(0);
+        let report = live.snapshot();
         let home_name = self.club_display_name(fixture.home_club_id);
         let away_name = self.club_display_name(fixture.away_club_id);
         let rendered = cm0102_match::render_match(
             &self.commentary_pack,
-            &outcome.events,
+            &report.events,
             (&home_name, &away_name),
             None,
             None,
             fixture.seed(),
         );
         if let Some(day) = self.shell.match_day.as_mut() {
-            day.report = Some(outcome);
+            day.live = Some(live);
+            day.report = Some(report);
             day.revealed = 0;
             day.second_half = false;
+            day.paused = false;
             day.last_tick = None;
             day.commentary = rendered.lines;
             day.holds = rendered.delays;
@@ -857,24 +953,77 @@ impl OpenCmApp {
         }
     }
 
+    /// Pull the simulation up to the revealed incidents and refresh
+    /// the snapshot plus its rendered commentary.
+    fn resimulate_to_revealed(&mut self) {
+        let revealed = self
+            .shell
+            .match_day
+            .as_ref()
+            .map(|day| day.revealed)
+            .unwrap_or(0);
+        let Some(day) = self.shell.match_day.as_mut() else {
+            return;
+        };
+        let Some(live) = day.live.as_mut() else {
+            return;
+        };
+        live.play_until_incident(revealed);
+        day.report = Some(live.snapshot());
+        let fixture = day.fixture.clone();
+        let events = day.report.as_ref().map(|report| report.events.clone());
+        let Some(events) = events else {
+            return;
+        };
+        let home_name = self.club_display_name(fixture.home_club_id);
+        let away_name = self.club_display_name(fixture.away_club_id);
+        let rendered = cm0102_match::render_match(
+            &self.commentary_pack,
+            &events,
+            (&home_name, &away_name),
+            None,
+            None,
+            fixture.seed(),
+        );
+        if let Some(day) = self.shell.match_day.as_mut() {
+            day.commentary = rendered.lines;
+            day.holds = rendered.delays;
+            day.prose = rendered.prose;
+        }
+    }
+
     /// Live commentary plus half-time pause and full-time report.
+    /// Each tick pulls the simulation forward, so the reveal never
+    /// outruns what is played; pausing holds both.
     fn show_live_match(&mut self, ui: &mut egui::Ui) {
         // Advance the reveal on a timer, pausing at half time.
+        let tick = match self.shell.match_day.as_ref() {
+            Some(day) if day.report.is_some() => {
+                let hold = day.hold_for(day.revealed);
+                let ticked = day.last_tick.is_some_and(|last| last.elapsed() >= hold);
+                day.last_tick.is_none() || (ticked && !day.at_half_time() && !day.paused)
+            }
+            _ => return,
+        };
+        if tick {
+            self.resimulate_to_revealed();
+        }
         let mut full_time = false;
         if let Some(day) = self.shell.match_day.as_mut() {
-            let Some(report) = day.report.as_ref() else {
-                return;
-            };
-            let total = report.events.len();
-            let ht_index = day.second_half_index();
-            let at_half_time =
-                !day.second_half && ht_index > 0 && day.revealed >= ht_index && total > ht_index;
-            let hold = day.hold_for(day.revealed);
-            let ticked = day.last_tick.is_some_and(|last| last.elapsed() >= hold);
-            if day.last_tick.is_none() || (ticked && !at_half_time && day.revealed < total) {
+            let total = day.report.as_ref().map(|report| report.events.len()).unwrap_or(0);
+            if day.revealed < total
+                && (day.last_tick.is_none() || {
+                    let hold = day.hold_for(day.revealed);
+                    let ticked = day.last_tick.is_some_and(|last| last.elapsed() >= hold);
+                    ticked && !day.at_half_time() && !day.paused
+                })
+            {
                 day.revealed = (day.revealed + 1).min(total);
                 day.last_tick = Some(Instant::now());
-                let fired = report.events.get(day.revealed.saturating_sub(1)).cloned();
+                let fired = day
+                    .report
+                    .as_ref()
+                    .and_then(|report| report.events.get(day.revealed.saturating_sub(1)).cloned());
                 if let Some(event) = fired {
                     day.fire_banner_for(&event);
                 }
@@ -886,7 +1035,7 @@ impl OpenCmApp {
             {
                 day.banner = None;
             }
-            full_time = day.is_full_time();
+            full_time = day.is_full_time() && !day.at_half_time();
         }
         if full_time {
             self.show_full_time(ui);
@@ -900,9 +1049,8 @@ impl OpenCmApp {
         let (home_goals, away_goals) = day.live_score();
         let minute = day.live_minute();
         let revealed = day.revealed;
-        let ht_index = day.second_half_index();
-        let at_half_time =
-            !day.second_half && ht_index > 0 && revealed >= ht_index && report.events.len() > ht_index;
+        let at_half_time = day.at_half_time();
+        let can_intervene = at_half_time || day.paused;
         let tab = day.tab;
         let banner = day.banner.clone();
         let last_tick = day.last_tick;
@@ -924,6 +1072,10 @@ impl OpenCmApp {
             }
         });
         ui.separator();
+        if can_intervene {
+            self.show_intervention(ui);
+            ui.separator();
+        }
         match tab {
             MatchDayTab::Overview => {
                 let commentary = self
@@ -992,8 +1144,9 @@ impl OpenCmApp {
         }
     }
 
-    /// Full-time report: score, stats, ratings, then back to the
-    /// main screen with the post-match news queued.
+    /// Full-time report: record the result and discipline once,
+    /// then score, stats, ratings, and back to the main screen with
+    /// the post-match news queued.
     fn show_full_time(&mut self, ui: &mut egui::Ui) {
         let pending = self.shell.match_day.as_ref().and_then(|day| {
             if day.news_done {
@@ -1004,6 +1157,17 @@ impl OpenCmApp {
                 .map(|report| (day.fixture.clone(), report, day.pre_suspensions.clone(), day.pre_injuries.clone()))
         });
         if let Some((fixture, report, pre_suspensions, pre_injuries)) = pending {
+            self.state.schedule.record_result(
+                fixture.date,
+                fixture.home_club_id,
+                fixture.away_club_id,
+                FixtureResult {
+                    home_goals: report.home_goals,
+                    away_goals: report.away_goals,
+                },
+                Some(report.clone()),
+            );
+            self.state.apply_match_report(&report);
             self.finalize_own_match(&fixture, &report, &pre_suspensions, &pre_injuries);
             if let Some(day) = self.shell.match_day.as_mut() {
                 day.news_done = true;
@@ -1326,10 +1490,67 @@ mod tests {
         assert!(!day.is_full_time());
         day.revealed = 1;
         assert_eq!(day.live_score(), (1, 0));
-        assert_eq!(day.second_half_index(), 1);
         assert_eq!(day.live_minute(), 10);
         day.revealed = 2;
         assert_eq!(day.live_score(), (1, 1));
+        assert!(day.is_full_time());
+    }
+
+    /// The interval is detected from the sim cap, not the event
+    /// list: everything played and revealed, second half unreleased.
+    #[test]
+    fn interval_detection_uses_sim_cap() {
+        use cm0102_core::{MatchContext, MatchPlayer, Mentality, Referee};
+        fn squad(prefix: &str, base: u32) -> Vec<MatchPlayer> {
+            (0..11)
+                .map(|i| MatchPlayer {
+                    id: base + i,
+                    name: format!("{prefix}{i}"),
+                    current_ability: 100,
+                    attributes: vec![10u8; 54],
+                    condition: 100,
+                    morale: 0,
+                })
+                .collect()
+        }
+        let context = MatchContext {
+            home_club_id: 1,
+            away_club_id: 2,
+            date: cm0102_core::GameDate::SEASON_START,
+            seed: 21,
+            home_avg_ca: 100.0,
+            away_avg_ca: 100.0,
+            home_players: squad("H", 0),
+            away_players: squad("A", 100),
+            home_subs: squad("HS", 200),
+            away_subs: squad("AS", 300),
+            home_mentality: Mentality::Normal,
+            away_mentality: Mentality::Normal,
+            home_men_behind_ball: false,
+            away_men_behind_ball: false,
+            extra_time_if_level: false,
+            weather: cm0102_core::MatchWeather::default(),
+            referee: Referee::default(),
+        };
+        let mut day = MatchDayState::pre_match(Fixture {
+            date: cm0102_core::GameDate::SEASON_START,
+            home_club_id: 1,
+            away_club_id: 2,
+            competition_id: 7,
+            result: None,
+            report: None,
+        });
+        let mut live = LiveMatch::new(context);
+        live.play_until_incident(10_000);
+        assert!(live.capped_for_interval());
+        let report = live.snapshot();
+        day.revealed = report.events.len();
+        day.live = Some(live);
+        day.report = Some(report);
+        assert!(day.at_half_time());
+        // Everything is revealed, so the raw full-time check also
+        // holds: match_phase() resolves the tie by testing the
+        // interval first.
         assert!(day.is_full_time());
     }
 }
