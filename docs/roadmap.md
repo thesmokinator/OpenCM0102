@@ -22,7 +22,7 @@ mechanics need playtest or function-level analysis), OPEN.
 | Season | [season.md](season.md) | `cm0102-core` season sim | Event-driven Continue done; board/finance open |
 | Players | [players.md](players.md) | `cm0102-core` data | Layout done; semantics open |
 | Saves | [saves.md](saves.md) | app + `cm0102-core` | Native done; container solved, payload layouts open |
-| App flows | [user-guide.md](user-guide.md) | app screens | Splash, career, match-day shell, theme done; jobs/search/editor open |
+| App flows | [user-guide.md](user-guide.md), [screens.md](screens.md) | app screens | Splash, career, match-day shell, theme done; per-screen layouts open; jobs/search/editor open |
 | Versions | [versions.md](versions.md) | all specs | Policy set: 3.9.60 data, 3.9.68 behaviour; playtest diff open |
 
 ## Rules files
