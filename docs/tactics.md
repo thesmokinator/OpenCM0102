@@ -47,7 +47,12 @@ match-engine effects are implemented:
 auto-pick), `PlayerInstructions` (only rows with observed option
 sets: marking, set-piece roles, pass direction),
 `TeamInstructions` and `TeamTactics` live in `cm0102-core`
-`tactics`. The match engine reads lineup strength (average current
+`tactics`. `cm0102-core` `preset` reads the shipped `.pct` files
+structurally: observed sizes (1,428/1,432/1,476) with the
+size-linked header word, the plain-text author at offset 54, slot
+validation 0–10 and the five-high-bits masking. Per-byte
+instruction semantics and the preset-to-formation mapping stay
+open. The match engine reads lineup strength (average current
 ability) through `MatchContext`; all instruction effects are
 explicitly unmodelled until observed.
 

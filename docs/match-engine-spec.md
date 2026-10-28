@@ -50,6 +50,15 @@ balanced.
 - Cup ties play two 15-minute periods when level, then a shootout:
   five rounds with early decision, then sudden death, taker order
   by penalty ability. Wiring to cup competitions waits on cups.
+- Duels gate every open-play chance (`cm0102-match` `duel`): paired
+  uniform rolls bounded by (30 - attribute), lower roll wins with
+  the times-six margin. Held duels end in a credited block; narrow
+  attacking wins leave the shot contested (keeper bonus). Shooters
+  drain condition by half a small drawn value per shot; the chance
+  rate was rebalanced for the gate so post-duel shot volume holds.
+  Pitch-grid bands (260/376) and the one-in-ten special-event gate
+  ship as tested helpers awaiting the grid model. Exact rating and
+  man-of-the-match writers stay open.
 - Suspensions and injury layoffs from match incidents are not yet
   applied to the season; tactics, morale and condition weights are
   still open.

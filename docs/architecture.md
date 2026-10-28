@@ -52,6 +52,16 @@ user ISO → ISO 9660 reader → InstallShield cabinet → .dat parsers
   `SavedCareer`.
 - `schedule.rs`: `Schedule`/`Fixture` with round-robin calendar
   generation; the schedule is the first real `DayEventSource`.
+- `cup.rs`: per-round cup draws (plain, seeded, seeded with
+  nation avoidance) plus the shared strength-seeding key.
+- `transfers.rs`: work-permit predicate/store/processor and the
+  scripted `player_setup.cfg` future-transfer/loan events.
+- `board.rs` / `regen.rs`: board-confidence scale and bands,
+  regen counts, draw ranges and inheritance gates.
+- `preset.rs`: structural `.pct` preset reader (sizes, header,
+  author, slot/mask validation).
+- `orig_save.rs`: original-save container reader (file table,
+  carving, RLE, fixed record layouts, general anchors).
 - `simulation.rs`: `process_day()` plus event-driven
   `continue_until_event()` against editable `ContinueRules`.
 - `traits.rs`: `DataProvider` (read access to the database),
@@ -66,6 +76,8 @@ user ISO → ISO 9660 reader → InstallShield cabinet → .dat parsers
   own-goal resolution, cards scaled by referee strictness,
   subs, injuries, ambient per-minute stats folded into one
   source of truth, all deterministic per fixture seed.
+- `duel.rs`: paired-roll duel gate, stamina drain, grid bands and
+  the special-event gate backing open-play chances.
 - `commentary.rs`: `events_eng.cfg` format reader and renderer
   (variants, probabilities, token filling, display holds);
   `data/commentary_en.cfg` is our own built-in pack — the

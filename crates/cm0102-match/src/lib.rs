@@ -16,20 +16,24 @@
 use cm0102_core::{
     EventKind, MatchContext, MatchEngine, MatchEvent, MatchInjury, MatchPlayer, MatchResult,
     MatchStats, Mentality, MinuteStats,
-    Shootout, ATTR_AGGRESSION, ATTR_ANTICIPATION, ATTR_ATTACKER, ATTR_DIRTINESS, ATTR_FINISHING,
-    ATTR_HANDLING, ATTR_HEADING, ATTR_INJURY_PRONENESS, ATTR_JUMPING, ATTR_LONG_SHOTS,
-    ATTR_ONE_ON_ONES, ATTR_PASSING, ATTR_PENALTIES, ATTR_REFLEXES, ATTR_TACKLING,
+    Shootout, ATTR_AGGRESSION, ATTR_ANTICIPATION, ATTR_ATTACKER, ATTR_DEFENDER, ATTR_DIRTINESS,
+    ATTR_FINISHING, ATTR_HANDLING, ATTR_HEADING, ATTR_INJURY_PRONENESS, ATTR_JUMPING,
+    ATTR_LONG_SHOTS, ATTR_ONE_ON_ONES, ATTR_PASSING, ATTR_PENALTIES, ATTR_REFLEXES, ATTR_TACKLING,
 };
 
 pub mod commentary;
+pub mod duel;
 pub use commentary::{
     CfgTokens, CommentaryPack, MatchCommentary, RenderedLine, TextHint, render, render_match,
 };
+pub use duel::{DuelResult, DuelWinner, GridBand, grid_band};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
 /// Base chance probability per team per minute, in permille.
-const CHANCE_PER_MILLE: u32 = 45;
+/// Rebalanced for the duel gate (roughly half of all chances end in
+/// a tackle), so post-duel shot volume matches the calibrated range.
+const CHANCE_PER_MILLE: u32 = 88;
 /// Strength adjustment bounds applied to the chance rate.
 const RATE_CLAMP: (f32, f32) = (0.7, 1.4);
 /// Chance-rate multiplier per team mentality.
@@ -766,6 +770,40 @@ fn maybe_substitute(side: &mut Side, home: bool, minute: u32, events: &mut Vec<M
     }
 }
 
+/// Duel the shooter against a random defending outfielder in paired
+/// rolls bounded by (30 - attribute). Returns `(contested,
+/// held_by)`: `held_by` is `Some` index when the defender held the
+/// duel (ties hold), and `contested` is true on a narrow attacking
+/// win below the clean-break margin. Empty defences wave through.
+fn contest_duel(rng: &mut ChaCha8Rng, shooter: &MatchPlayer, defence: &Side) -> (bool, Option<usize>) {
+    let start = if defence.pitch.len() > 1 { 1 } else { 0 };
+    if start >= defence.pitch.len() {
+        return (false, None);
+    }
+    let span = (defence.pitch.len() - start) as u32;
+    let index = start + roll(rng, span) as usize;
+    let defender = &defence.pitch[index].player;
+    let roll_a = roll(rng, duel::duel_bound(shooter.attribute(ATTR_ATTACKER)));
+    let roll_b = roll(rng, duel::duel_bound(defender.attribute(ATTR_DEFENDER)));
+    let result = duel::resolve_duel(
+        shooter.attribute(ATTR_ATTACKER),
+        defender.attribute(ATTR_DEFENDER),
+        roll_a,
+        roll_b,
+    );
+    match result.winner {
+        DuelWinner::Defender => (false, Some(index)),
+        DuelWinner::Attacker => (result.margin6 < duel::CLEAN_BREAK_MARGIN, None),
+    }
+}
+
+/// Drain the shooter's condition by half a small drawn value after
+/// each shot: stamina costs action.
+fn drain_shooter(rng: &mut ChaCha8Rng, tracker: &mut Tracker) {
+    let drain = duel::stamina_drain(roll(rng, 5));
+    tracker.player.condition = tracker.player.condition.saturating_sub(drain.min(255) as u8);
+}
+
 /// Resolve one open-play chance: pick a shooter, roll the competing
 /// category rolls, contest the keeper, apply the distance falloff.
 fn resolve_chance(
@@ -783,11 +821,40 @@ fn resolve_chance(
     };
     let keeper_skill = keeper_skill(&sides[defend]);
     let shooter = sides[attack].pitch[shooter_index].player.clone();
+    // Documented duel first: the shooter must beat a random defending
+    // outfielder in paired rolls bounded by (30 - attribute). A held
+    // duel ends in a block; a narrow win leaves the shot contested.
+    let (contested, held_index) = contest_duel(rng, &shooter, &sides[defend]);
+    if let Some(defender_index) = held_index {
+        sides[attack].pitch[shooter_index].shots += 1;
+        drain_shooter(rng, &mut sides[attack].pitch[shooter_index]);
+        sides[defend].pitch[defender_index].tackles += 1;
+        bump_shots(played, home, false);
+        if home {
+            played.away.tackles += 1;
+        } else {
+            played.home.tackles += 1;
+        }
+        events.push(MatchEvent {
+            minute,
+            home,
+            kind: EventKind::ShotBlocked,
+            player: shooter.name.clone(),
+            other: None,
+            commentary_id: Some(37),
+            distance_yards: None,
+        });
+        return;
+    }
     let distance = MIN_DISTANCE + roll(rng, DISTANCE_SPREAD);
     let (kind, winner) = winning_category(rng, &shooter, distance);
     sides[attack].pitch[shooter_index].shots += 1;
+    drain_shooter(rng, &mut sides[attack].pitch[shooter_index]);
     let falloff = (distance * distance) as i32 / FALLOFF_DIVISOR;
-    let keeper_roll = roll(rng, keeper_skill.max(1)) as i32;
+    let mut keeper_roll = roll(rng, keeper_skill.max(1)) as i32;
+    if contested {
+        keeper_roll += duel::CONTESTED_KEEPER_BONUS;
+    }
     if winner as i32 + SHOT_BONUS > keeper_roll + falloff + KEEPER_BONUS {
         sides[attack].pitch[shooter_index].goals += 1;
         sides[attack].pitch[shooter_index].on_target += 1;

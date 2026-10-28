@@ -82,6 +82,17 @@ playtest or function-level analysis).
 - AI clubs bid, negotiate and withdraw (toggleable).
   (STRING-EVIDENCE)
 
+## Permits and setup events (implemented)
+
+`cm0102-core` `transfers` implements the solved parts:
+`permit_required` (flagged destination plus EU/second-nationality
+exemption), the sorted 14-byte `PermitRecord` store with
+grant-within-five-days processing, renewal refresh and swap-remove
+removal, and the `player_setup.cfg` parser (`FUTURE_TRANSFER` and
+`LOAN` shapes with trailing arguments ignored) plus `due_events`
+filtering by date. Deadlines, valuations and tribunal formulas stay
+open.
+
 ## Rules surface (editable targets)
 
 Deadlines and windows per nation, loan/permit/fee/clause rules,

@@ -37,6 +37,18 @@ are that version. Ground rules:
   bit-identical future results: simulation algorithms are a faithful
   reimplementation, not the original binaries.
 
+## Container reader (implemented)
+
+`cm0102-core` `orig_save` parses the file table (268-byte entries:
+five `u32` values with offset and size last, then the 248-byte
+name), carves payloads strictly by offset and size, decodes the
+byte RLE, chunks the finance (359-byte), discipline (29-byte) and
+injury (31-byte) record arrays, and reads the documented
+`general.dat` anchors. Entry order was cross-checked by carving the
+`continent.dat` payload of a second sample (six 198-byte records,
+six continent names). Raw-vs-packed selection per entry and the
+remaining payload layouts stay open.
+
 ## Original format (VERIFIED-DATA, 3.9.60 sample)
 
 Container verified byte-exact on a user-supplied 3.9.60 save (109

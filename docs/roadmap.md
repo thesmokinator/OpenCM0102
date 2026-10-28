@@ -69,6 +69,19 @@ Closed through analysis (see spec docs for details):
 - Persisted match-stats file header solved (count, 12-byte
   aggregate records, six header words); modern-save inventory
   verified at 317 sections with mixed raw/RLE payloads.
+- Cup draw engine implemented (three per-round modes, seeding key,
+  bye carry; bindings open).
+- Work-permit predicate, 14-byte store and five-day processor plus
+  `player_setup.cfg` future-transfer/loan parsing implemented.
+- Board-confidence scale, six bands and dated records plus regen
+  counts, draw ranges and inheritance gates implemented.
+- Duel gate, stamina drain, grid bands and special-event gate
+  implemented in the match engine (chance rate rebalanced).
+- `.pct` structural reader (sizes, header, author@54, slot/mask
+  validation) implemented; per-byte semantics open.
+- Original-save container reader (table, carving, RLE, finance/
+  discipline/injury records, general anchors) implemented and
+  cross-checked on a second sample's continent payload.
 
 Still open (each needs playtest observation, function-level
 analysis, or both — details in the per-system specs):

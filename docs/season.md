@@ -78,6 +78,18 @@ playtest or function-level analysis).
   commentary speed; season-ticket income and a Director of
   Football role exist. (STRING-EVIDENCE)
 
+## Board confidence and regen (implemented)
+
+`cm0102-core` `board` implements the solved confidence value: the
+0–10,000 scale with the six verified message bands, per-manager
+main-block values with dated sub-records, and explicit signed
+steps (result-driven deltas stay open, so callers pass the step).
+`cm0102-core` `regen` implements generation counts (pending minus
+two above two pending), unattached draw ranges (two 1–1500 plus one
+1–500) with range checks, and attached inheritance with the
+one-half and three-quarters strength gates plus the 7,501 threshold
+branch. Intake dates, finance formulas and job labels stay open.
+
 ## Rules surface (editable targets)
 
 Calendar dates, board strictness, finance parameters, job rules,

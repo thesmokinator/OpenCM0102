@@ -75,6 +75,16 @@ Once specified, every rule becomes an editable data file with the
 01/02 season as default — see "Rules as data" in
 [architecture.md](architecture.md).
 
+## Cup draws (implemented)
+
+`cm0102-core` `cup` draws one round from a pot of entrants plus
+carried-in byes: `DrawMode::Plain` shuffles, `Seeded` and
+`SeededNationAvoidance` sort by seeding value highest-first and deal
+from a random start with wraparound, flipping a coin for home/away
+per tie. `seeding_score` sums the documented key (squad-value term
+plus sixteen times club strength plus weighted best-fifteen
+ratings). Per-round mode bindings stay open.
+
 ## Calendars (implemented)
 
 League fixture lists are generated, not stored: `Schedule` in
